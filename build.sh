@@ -2,7 +2,7 @@
 # Builds Launchpad.app as a universal (Apple Silicon + Intel) binary.
 #   ./build.sh            build into build/Launchpad.app
 #   ./build.sh --install  also copy it into /Applications and launch it
-#   ./build.sh --dmg      also package build/MacBook-Launchpad-<version>.dmg
+#   ./build.sh --dmg      also package build/MacBook-Launchpad-<version>.dmg (+ a version-free copy)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -40,6 +40,8 @@ case "${1:-}" in
     ln -s /Applications "$STAGING/Applications"
     hdiutil create -volname "MacBook Launchpad" -srcfolder "$STAGING" -ov -format UDZO "$DMG" >/dev/null
     rm -rf "$STAGING"
+    # Version-free copy so https://.../releases/latest/download/MacBook-Launchpad.dmg always works
+    cp "$DMG" build/MacBook-Launchpad.dmg
     shasum -a 256 "$DMG"
     echo "Packaged $DMG"
     ;;

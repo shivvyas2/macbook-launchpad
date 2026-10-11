@@ -24,7 +24,7 @@ It is completely free, has no ads, accounts, or tracking, and the full source co
 
 ## Download
 
-**[⬇ Download MacBook Launchpad (free DMG)](https://github.com/shivvyas2/macbook-launchpad/releases/latest)**
+**[⬇ Download MacBook Launchpad (free DMG)](https://github.com/shivvyas2/macbook-launchpad/releases/latest/download/MacBook-Launchpad.dmg)** · [All releases](https://github.com/shivvyas2/macbook-launchpad/releases) · [Website](https://www.shivvyas.com/launchpad)
 
 1. Open `MacBook-Launchpad-<version>.dmg` and drag **Launchpad** into **Applications**.
 2. Open Launchpad from Applications. The first time, macOS will say it can't verify the developer — the app is open source but not notarized by Apple.
