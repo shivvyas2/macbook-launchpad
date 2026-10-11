@@ -17,15 +17,14 @@ final class LaunchpadStore {
     var draggingID: String?
     var folderTargetID: String?
     var isShown = false
-    var wallpaper: NSImage?
     var screenInsets = EdgeInsets()
-    var screenSize = CGSize(width: 1440, height: 900)
 
     /// Apps the user chose to hide from the grid and search.
     private(set) var hiddenApps: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "hiddenApps") ?? []) {
         didSet { UserDefaults.standard.set(Array(hiddenApps), forKey: "hiddenApps") }
     }
     var editingFolderName = false
+    var showingOrganizer = false
 
     var dismiss: (() -> Void)?
     var openSettings: (() -> Void)?
@@ -201,11 +200,8 @@ final class LaunchpadStore {
     func updateFolder(_ id: UUID, _ change: (inout Folder) -> Void) {
         guard let i = entries.firstIndex(where: { $0.folder?.id == id }), var folder = entries[i].folder else { return }
         change(&folder)
-        if folder.apps.isEmpty {
-            entries.remove(at: i)
-            if openFolderID == id { openFolderID = nil }
-        } else if folder.apps.count == 1 && openFolderID != id {
-            entries[i] = .app(folder.apps[0]) // a folder of one dissolves
+        if folder.apps.isEmpty && openFolderID != id {
+            entries.remove(at: i) // an empty folder disappears once it's closed
         } else {
             entries[i] = .folder(folder)
         }
@@ -230,14 +226,77 @@ final class LaunchpadStore {
         guard let id = openFolderID else { return }
         openFolderID = nil
         editingFolderName = false
-        dissolveFolderIfSingle(id)
+        updateFolder(id) { _ in }
     }
 
-    func dissolveFolderIfSingle(_ folderID: UUID) {
-        guard let i = entries.firstIndex(where: { $0.folder?.id == folderID }), let folder = entries[i].folder, folder.apps.count == 1 else { return }
-        entries[i] = .app(folder.apps[0])
+    /// Creates a folder (optionally around an app, taking its slot) and opens it for naming.
+    func createFolder(with app: String? = nil) {
+        let folder = Folder(id: UUID(), name: "New Folder", apps: app.map { [$0] } ?? [])
+        if let app, let i = index(of: app) {
+            entries[i] = .folder(folder)
+        } else {
+            let end = min(entries.count, (currentPage + 1) * perPage)
+            entries.insert(.folder(folder), at: end)
+            if end >= (currentPage + 1) * perPage { goToPage(currentPage + 1) }
+        }
+        openFolderID = folder.id
         save()
     }
+
+    /// Moves an app into a folder, from the grid or from another folder.
+    func addToFolder(_ folderID: UUID, app: String) {
+        if let i = index(of: app) {
+            entries.remove(at: i)
+        } else if let other = folderContaining(app), other.id != folderID {
+            updateFolder(other.id) { $0.apps.removeAll { $0 == app } }
+        }
+        updateFolder(folderID) { if !$0.apps.contains(app) { $0.apps.append(app) } }
+    }
+
+    /// Apps sitting directly on the grid, i.e. not inside any folder.
+    var looseApps: [AppInfo] {
+        entries.compactMap { entry in
+            if case .app(let path) = entry { return apps[path] }
+            return nil
+        }
+    }
+
+    // MARK: Organize assistant
+
+    private(set) var undoEntries: [LayoutEntry]?
+
+    /// Replaces the layout with the given folders, then every remaining app alphabetically.
+    func applyOrganization(_ plan: [Folder], keepExistingFolders: Bool) {
+        undoEntries = entries
+        var folders: [Folder] = keepExistingFolders ? entries.compactMap(\.folder) : []
+        let planned = Set(plan.flatMap(\.apps))
+        for i in folders.indices { folders[i].apps.removeAll { planned.contains($0) } }
+        for proposal in plan {
+            if let i = folders.firstIndex(where: { $0.name.localizedCaseInsensitiveCompare(proposal.name) == .orderedSame }) {
+                folders[i].apps += proposal.apps
+            } else {
+                folders.append(proposal)
+            }
+        }
+        folders.removeAll { $0.apps.isEmpty }
+        folders.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        let inFolders = Set(folders.flatMap(\.apps))
+        let loose = apps.values.filter { !inFolders.contains($0.id) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        entries = folders.map { .folder($0) } + loose.map { .app($0.id) }
+        currentPage = 0
+        save()
+    }
+
+    func undoOrganization() {
+        guard let previous = undoEntries else { return }
+        entries = previous
+        undoEntries = nil
+        reload()
+        save()
+    }
+
+    func clearUndo() { undoEntries = nil }
 
     func ungroup(_ folderID: UUID) {
         guard let i = entries.firstIndex(where: { $0.folder?.id == folderID }), let folder = entries[i].folder else { return }
@@ -251,22 +310,9 @@ final class LaunchpadStore {
     }
 
     private func suggestedFolderName(for paths: [String]) -> String {
-        let categories = paths.compactMap { path -> String? in
-            guard let bundle = Bundle(path: path), let type = bundle.infoDictionary?["LSApplicationCategoryType"] as? String else { return nil }
-            return type
-        }
-        if let first = categories.first, categories.allSatisfy({ $0 == first }) {
-            let raw = first.replacingOccurrences(of: "public.app-category.", with: "")
-            let pretty: [String: String] = [
-                "developer-tools": "Developer", "productivity": "Productivity", "social-networking": "Social",
-                "utilities": "Utilities", "graphics-design": "Design", "photography": "Photos",
-                "music": "Music", "video": "Video", "games": "Games", "entertainment": "Entertainment",
-                "business": "Business", "finance": "Finance", "education": "Education",
-                "news": "News", "reference": "Reference", "lifestyle": "Lifestyle", "travel": "Travel",
-                "health-fitness": "Health", "weather": "Weather", "sports": "Sports",
-            ]
-            return pretty[raw] ?? raw.replacingOccurrences(of: "-", with: " ").capitalized
-        }
+        let names = Set(paths.compactMap { apps[$0] }.map(Organizer.folderName(for:)))
+        if names.count == 1, let name = names.first, name != Organizer.other { return name }
         return "Folder"
     }
+
 }

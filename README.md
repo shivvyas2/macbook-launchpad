@@ -18,7 +18,7 @@
 
 ---
 
-macOS 26 Tahoe removed **Launchpad** and replaced it with the Apps view. **MacBook Launchpad** brings back the full-screen grid of app icons you remember: swipe between pages, drag icons into folders, type to search, and open it from a shortcut, a hot corner, or the trackpad pinch gesture.
+macOS 26 Tahoe removed **Launchpad** and replaced it with the Apps view. **MacBook Launchpad** brings back the full-screen grid of app icons you remember: swipe between pages, drag icons into folders, type to search, and open it from a shortcut, a hot corner, or the trackpad pinch gesture. A built-in **Organize Apps assistant** can sort every app into tidy folders in one click.
 
 It is completely free, has no ads, accounts, or tracking, and the full source code is right here.
 
@@ -40,9 +40,10 @@ xattr -dr com.apple.quarantine /Applications/Launchpad.app
 
 ## Features
 
-- **Full-screen app grid** over your blurred wallpaper, just like the original Launchpad
+- **Full-screen app grid** on a frosted Liquid Glass blur of your current desktop — your wallpaper's real colors, no grey tint
 - **Instant search** — start typing, press Return to open. Matches initials too (`vsc` → Visual Studio Code)
-- **Folders** — drag one app onto another to group them; click the name to rename
+- **Organize Apps assistant** — one click sorts everything into folders like Developer, Creative, Productivity, Social, Media, AI, and Utilities. Preview and rename the folders first, keep your own folders if you like, and undo afterwards
+- **Create folders your way** — the New Folder button, right-click › New Folder, or drag one app onto another. Click **+** inside a folder to pick apps to add, and click the name to rename it
 - **Drag to rearrange**, drag to the screen edge to move between pages
 - **Swipe between pages** with the trackpad, scroll wheel, or arrow keys
 - **Open it your way**

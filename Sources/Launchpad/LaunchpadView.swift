@@ -10,10 +10,16 @@ struct LaunchpadView: View {
         GeometryReader { geo in
             let layout = GridLayout(size: geo.size, insets: store.screenInsets, prefs: prefs)
             ZStack {
-                // Blurred desktop picture, like the original Launchpad. Tapping it closes the launcher.
-                WallpaperBackground(store: store)
+                // The window itself is frosted glass over the screen. Tapping empty space closes the launcher.
+                Color.clear
                     .contentShape(Rectangle())
-                .onTapGesture { store.dismiss?() }
+                    .onTapGesture { store.dismiss?() }
+                    .contextMenu {
+                        Button("New Folder") { withAnimation(.spring(duration: 0.35)) { store.createFolder() } }
+                        Button("Organize Apps…") { withAnimation(.spring(duration: 0.35)) { store.showingOrganizer = true } }
+                        Divider()
+                        Button("Settings…") { store.openSettings?() }
+                    }
 
                 VStack(spacing: 0) {
                     SearchField(text: $store.query, focused: $searchFocused)
@@ -35,7 +41,7 @@ struct LaunchpadView: View {
                 }
                 .scaleEffect(store.isShown ? 1 : 1.07)
                 .opacity(store.isShown ? 1 : 0)
-                .blur(radius: store.openFolderID != nil ? 14 : 0)
+                .blur(radius: store.openFolderID != nil || store.showingOrganizer ? 14 : 0)
 
                 if store.draggingID != nil && store.query.isEmpty && store.openFolderID == nil {
                     EdgeFlipZones(store: store)
@@ -47,10 +53,33 @@ struct LaunchpadView: View {
                         .zIndex(2)
                 }
 
-                SettingsButton { store.openSettings?() }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                    .padding(28)
-                    .opacity(store.isShown && store.openFolderID == nil ? 1 : 0)
+                if store.showingOrganizer {
+                    OrganizeOverlay(store: store)
+                        .transition(.scale(scale: 0.9).combined(with: .opacity))
+                        .zIndex(3)
+                }
+
+                if store.undoEntries != nil && !store.showingOrganizer {
+                    UndoToast(store: store)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                        .padding(.bottom, layout.bottomInset + 8)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .zIndex(4)
+                }
+
+                HStack(spacing: 12) {
+                    CircleButton(symbol: "folder.badge.plus", help: "New Folder") {
+                        withAnimation(.spring(duration: 0.35)) { store.createFolder() }
+                    }
+                    CircleButton(symbol: "wand.and.sparkles", help: "Organize Apps") {
+                        withAnimation(.spring(duration: 0.35)) { store.showingOrganizer = true }
+                    }
+                    CircleButton(symbol: "gearshape.fill", help: "Settings") { store.openSettings?() }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                .padding(.trailing, 28)
+                .padding(.bottom, store.screenInsets.bottom + 20)
+                .opacity(store.isShown && store.openFolderID == nil && !store.showingOrganizer ? 1 : 0)
             }
             // Catch-all so a drag released anywhere always ends cleanly.
             .onDrop(of: [.text], delegate: EndDragDelegate(store: store))
@@ -265,6 +294,11 @@ struct AppMenu: View {
         Button("Open") { store.launch(app) }
         Button("Show in Finder") { store.showInFinder(app) }
         Button("Hide from Launchpad") { withAnimation(.spring(duration: 0.3)) { store.hide(app) } }
+        if folderID == nil && store.index(of: app.id) != nil {
+            Button("New Folder with “\(app.name)”") {
+                withAnimation(.spring(duration: 0.35)) { store.createFolder(with: app.id) }
+            }
+        }
         if let folderID {
             Divider()
             Button("Remove from Folder") {
@@ -372,6 +406,7 @@ struct FolderOverlay: View {
     let folder: Folder
     let layout: GridLayout
     @FocusState private var nameFocused: Bool
+    @State private var addingApps = false
 
     var body: some View {
         let columns = min(max(folder.apps.count, 3), layout.columns - 1, 6)
@@ -393,6 +428,28 @@ struct FolderOverlay: View {
                 .foregroundStyle(.white)
                 .focused($nameFocused)
                 .frame(maxWidth: 360)
+                .overlay(alignment: .trailing) {
+                    Button { withAnimation(.spring(duration: 0.3)) { addingApps.toggle() } } label: {
+                        Image(systemName: addingApps ? "checkmark" : "plus")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: .circle)
+                    .help(addingApps ? "Done Adding" : "Add Apps")
+                    .offset(x: 44)
+                }
+
+                if addingApps {
+                    AddAppsPicker(store: store, folderID: folder.id) {
+                        withAnimation(.spring(duration: 0.3)) { addingApps = false }
+                    }
+                    .transition(.opacity)
+                } else if folder.apps.isEmpty {
+                    Text("Drag apps here, or click + to add some.")
+                        .foregroundStyle(.secondary)
+                        .frame(height: 80)
+                }
 
                 ScrollView {
                     LazyVGrid(columns: Array(repeating: GridItem(.fixed(cell.width), spacing: 0), count: columns), spacing: 0) {
@@ -420,11 +477,18 @@ struct FolderOverlay: View {
                 .frame(height: min(CGFloat((folder.apps.count + columns - 1) / columns), 3) * cell.height)
             }
             .padding(30)
-            .frame(width: CGFloat(columns) * cell.width + 60)
+            .frame(width: max(CGFloat(columns) * cell.width + 60, addingApps ? 600 : 0))
             .glassEffect(.regular, in: .rect(cornerRadius: 40))
             .environment(\.colorScheme, .dark)
         }
         .onChange(of: nameFocused) { _, focused in store.editingFolderName = focused }
+        .onAppear {
+            // A brand-new folder starts with its name selected and the app picker open.
+            if folder.name == "New Folder" && folder.apps.count <= 1 {
+                nameFocused = true
+                addingApps = folder.apps.isEmpty
+            }
+        }
     }
 }
 
@@ -449,19 +513,21 @@ struct PageDots: View {
     }
 }
 
-struct SettingsButton: View {
+struct CircleButton: View {
+    let symbol: String
+    let help: String
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "gearshape.fill")
+            Image(systemName: symbol)
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.white.opacity(0.85))
                 .frame(width: 40, height: 40)
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .circle)
-        .help("Settings")
+        .help(help)
     }
 }
 
@@ -481,26 +547,5 @@ struct EdgeFlipZones: View {
         Color.white.opacity(0.001)
             .frame(width: 70)
             .onDrop(of: [.text], delegate: EdgeFlipDelegate(store: store, direction: direction))
-    }
-}
-
-/// The blurred desktop picture sized to the whole screen, pinned to the top-left corner.
-struct WallpaperBackground: View {
-    let store: LaunchpadStore
-
-    var body: some View {
-        ZStack {
-            if let wallpaper = store.wallpaper {
-                Image(nsImage: wallpaper)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: store.screenSize.width, height: store.screenSize.height)
-                    .clipped()
-            }
-            Color.black.opacity(store.wallpaper == nil ? 0.22 : 0.12)
-        }
-        .frame(width: store.screenSize.width, height: store.screenSize.height)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .clipped()
     }
 }

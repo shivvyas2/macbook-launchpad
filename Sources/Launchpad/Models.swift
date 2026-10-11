@@ -1,5 +1,4 @@
 import AppKit
-import CoreImage
 
 /// An installed application found on disk.
 struct AppInfo: Identifiable, Hashable {
@@ -104,23 +103,4 @@ final class IconCache {
     }
 
     func invalidate() { cache.removeAll() }
-}
-
-/// The desktop picture, downscaled and blurred once per wallpaper change.
-@MainActor
-enum Wallpaper {
-    private static var cache: (url: URL, image: NSImage)?
-
-    static func blurred(for screen: NSScreen) -> NSImage? {
-        guard let url = NSWorkspace.shared.desktopImageURL(for: screen) else { return nil }
-        if let cache, cache.url == url { return cache.image }
-        guard let source = CIImage(contentsOf: url), source.extent.width > 0 else { return nil }
-        let scale = 1000 / source.extent.width
-        let small = source.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        let blurred = small.clampedToExtent().applyingGaussianBlur(sigma: 22).cropped(to: small.extent)
-        guard let cg = CIContext().createCGImage(blurred, from: small.extent) else { return nil }
-        let image = NSImage(cgImage: cg, size: .zero)
-        cache = (url, image)
-        return image
-    }
 }

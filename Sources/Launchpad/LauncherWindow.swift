@@ -40,12 +40,9 @@ final class LauncherController {
 
     func toggle() { isVisible ? hide() : show() }
 
-    /// SwiftUI content over a behind-window blur, used when no wallpaper image is available.
+    /// SwiftUI content over a frosted-glass blur of whatever is on screen behind the window.
     private static func blurredHost(_ view: some View) -> NSView {
-        let blur = NSVisualEffectView()
-        blur.material = .fullScreenUI
-        blur.blendingMode = .behindWindow
-        blur.state = .active
+        let blur = ClearGlassView()
         let host = NSHostingView(rootView: view)
         host.translatesAutoresizingMaskIntoConstraints = false
         host.sizingOptions = []
@@ -67,13 +64,13 @@ final class LauncherController {
 
         store.query = ""
         store.openFolderID = nil
+        store.showingOrganizer = false
+        store.clearUndo()
         store.swipeOffset = 0
         store.reload()
-        store.wallpaper = Wallpaper.blurred(for: screen)
         // The menu bar auto-hides while open, so only the camera notch (if any) limits the top.
         store.screenInsets = EdgeInsets(top: screen.safeAreaInsets.top, leading: 0,
                                         bottom: screen.visibleFrame.minY - screen.frame.minY, trailing: 0)
-        store.screenSize = screen.frame.size
 
         panel.alphaValue = 0
         NSApp.activate()
@@ -134,7 +131,8 @@ final class LauncherController {
         let columns = Preferences.shared.columns
         switch Int(event.keyCode) {
         case kVK_Escape:
-            if store.openFolderID != nil { withAnimation(.spring(duration: 0.3)) { store.closeFolder() } }
+            if store.showingOrganizer { withAnimation(.spring(duration: 0.3)) { store.showingOrganizer = false } }
+            else if store.openFolderID != nil { withAnimation(.spring(duration: 0.3)) { store.closeFolder() } }
             else if searching { store.query = "" }
             else { hide() }
             return true
@@ -171,7 +169,7 @@ final class LauncherController {
     }
 
     private func handleScroll(_ event: NSEvent) -> Bool {
-        guard store.query.isEmpty, store.openFolderID == nil else { return false }
+        guard store.query.isEmpty, store.openFolderID == nil, !store.showingOrganizer else { return false }
         let width = panel.frame.width
         if event.hasPreciseScrollingDeltas {
             // Trackpad: follow the fingers, then snap to a page.
@@ -202,5 +200,50 @@ final class LauncherController {
         lastWheelPage = Date()
         withAnimation(.spring(duration: 0.4, bounce: 0.1)) { store.goToPage(store.currentPage + (delta < 0 ? 1 : -1)) }
         return true
+    }
+}
+
+/// A behind-window blur with the system tint removed, so the background keeps its true colors.
+final class ClearGlassView: NSVisualEffectView {
+    var blurRadius: CGFloat = 36
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        material = .fullScreenUI
+        blendingMode = .behindWindow
+        state = .active
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func layout() {
+        super.layout()
+        stripTint()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        stripTint()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        stripTint()
+    }
+
+    /// The material is a backdrop layer (blur + saturation) under "fill", "tone" and chameleon tint layers.
+    /// Keep only the blur.
+    private func stripTint() {
+        guard let material = layer?.sublayers?.first else { return }
+        for sublayer in material.sublayers ?? [] {
+            if String(describing: type(of: sublayer)) == "CABackdropLayer" {
+                let filters = (sublayer.filters ?? []).compactMap { $0 as? NSObject }
+                let blur = filters.filter { ($0.value(forKey: "name") as? String) == "gaussianBlur" }
+                blur.forEach { $0.setValue(blurRadius, forKey: "inputRadius") }
+                if blur.count != filters.count { sublayer.filters = blur }
+            } else if !sublayer.isHidden {
+                sublayer.isHidden = true
+            }
+        }
     }
 }
