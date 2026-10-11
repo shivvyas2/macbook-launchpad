@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Carbon.HIToolbox
+import UniformTypeIdentifiers
 
 final class LauncherPanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -37,6 +38,7 @@ final class LauncherController {
         panel.contentView = Self.blurredHost(LaunchpadView(store: store))
 
         store.dismiss = { [weak self] in self?.hide() }
+        store.chooseApps = { [weak self] in self?.chooseApps() }
         NotificationCenter.default.addObserver(self, selector: #selector(screensChanged),
                                                name: NSApplication.didChangeScreenParametersNotification, object: nil)
     }
@@ -129,6 +131,22 @@ final class LauncherController {
         })
     }
 
+    /// "Add Application…": pick apps from anywhere on disk to put on the grid.
+    private func chooseApps() {
+        let open = NSOpenPanel()
+        open.message = "Choose apps to add to Launchpad"
+        open.prompt = "Add"
+        open.allowedContentTypes = [.applicationBundle]
+        open.allowsMultipleSelection = true
+        open.treatsFilePackagesAsDirectories = false
+        open.directoryURL = URL(fileURLWithPath: NSHomeDirectory() + "/Downloads")
+        open.level = NSWindow.Level(rawValue: panel.level.rawValue + 1) // above the full-screen launcher
+        open.begin { [weak self] response in
+            guard response == .OK, let self else { return }
+            withAnimation(.spring(duration: 0.35)) { _ = self.store.addApps(open.urls) }
+        }
+    }
+
     // MARK: Event handling
 
     private func installMonitors() {
@@ -167,7 +185,7 @@ final class LauncherController {
             else if store.showingOrganizer { withAnimation(.spring(duration: 0.3)) { store.showingOrganizer = false } }
             else if store.isEditing { withAnimation(.spring(duration: 0.3)) { store.isEditing = false } }
             else if store.openFolderID != nil { withAnimation(.spring(duration: 0.34, bounce: 0.05)) { store.closeFolder() } }
-            else if searching { store.query = ""; panel.makeFirstResponder(nil) }
+            else if searching { store.query = "" }
             else { hide() }
             return true
         case kVK_LeftArrow where !searching && !store.editingFolderName:
@@ -191,28 +209,24 @@ final class LauncherController {
             hide()
             return true
         default:
-            focusSearchForTyping(event)
-            return false
+            return typeIntoSearch(event)
         }
     }
 
-    /// Type-to-search: the first printable key focuses the search field, then passes through to it.
-    private func focusSearchForTyping(_ event: NSEvent) {
+    /// Type-to-search: while the search field isn't focused, typed characters go straight into the query and
+    /// the field is asked to take focus, so nothing is lost while focus moves over.
+    private func typeIntoSearch(_ event: NSEvent) -> Bool {
         guard !(panel.firstResponder is NSText), // a field is already being edited
               store.openFolderID == nil, !store.showingOrganizer,
               event.modifierFlags.intersection([.command, .control]).isEmpty,
-              let chars = event.characters, !chars.isEmpty,
-              chars.unicodeScalars.allSatisfy({ !CharacterSet.whitespacesAndNewlines.union(.controlCharacters).contains($0) }),
-              !(0xF700...0xF8FF).contains(chars.unicodeScalars.first!.value), // function / arrow keys
-              let field = Self.firstTextField(in: panel.contentView)
-        else { return }
-        panel.makeFirstResponder(field)
-    }
-
-    private static func firstTextField(in view: NSView?) -> NSTextField? {
-        guard let view else { return nil }
-        if let field = view as? NSTextField, field.isEditable { return field }
-        return view.subviews.lazy.compactMap { firstTextField(in: $0) }.first
+              let chars = event.characters, let first = chars.unicodeScalars.first,
+              !(0xF700...0xF8FF).contains(first.value), // arrow / function keys
+              !chars.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+              !(store.query.isEmpty && chars.trimmingCharacters(in: .whitespaces).isEmpty)
+        else { return false }
+        store.query += chars
+        store.searchFocusRequest += 1
+        return true
     }
 
     private func moveSelection(_ delta: Int) -> Bool {

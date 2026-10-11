@@ -51,6 +51,15 @@ enum AppScanner {
         "/System/Library/CoreServices/Applications/About This Mac.app",
     ]
 
+    /// The app bundle at `url`, wherever it lives on disk. Nil if it isn't an app.
+    static func app(at url: URL) -> AppInfo? {
+        let path = url.resolvingSymlinksInPath().path
+        guard url.pathExtension == "app", FileManager.default.fileExists(atPath: path) else { return nil }
+        var name = FileManager.default.displayName(atPath: url.path)
+        if name.hasSuffix(".app") { name = String(name.dropLast(4)) }
+        return AppInfo(id: path, name: name, url: URL(fileURLWithPath: path), bundleID: Bundle(url: url)?.bundleIdentifier)
+    }
+
     static func scan() -> [AppInfo] {
         let fm = FileManager.default
         var seen = Set<String>()
@@ -59,15 +68,12 @@ enum AppScanner {
         func add(_ url: URL) {
             let path = url.resolvingSymlinksInPath().path
             guard !hidden.contains(path), seen.insert(path).inserted else { return }
-            let bundle = Bundle(url: url)
-            if let info = bundle?.infoDictionary,
+            if let info = Bundle(url: url)?.infoDictionary,
                (info["LSUIElement"] as? Bool == true || info["LSUIElement"] as? String == "1"),
                !path.hasPrefix("/Applications") {
                 return // background-only system agents
             }
-            var name = fm.displayName(atPath: url.path)
-            if name.hasSuffix(".app") { name = String(name.dropLast(4)) }
-            result.append(AppInfo(id: path, name: name, url: URL(fileURLWithPath: path), bundleID: bundle?.bundleIdentifier))
+            if let app = app(at: url) { result.append(app) }
         }
 
         for root in roots {

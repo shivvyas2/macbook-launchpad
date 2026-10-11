@@ -4,6 +4,7 @@ struct LaunchpadView: View {
     @Bindable var store: LaunchpadStore
     @FocusState private var searchFocused: Bool
     @Namespace private var morph
+    @State private var dropTargeted = false
     private var prefs: Preferences { .shared }
 
     var body: some View {
@@ -21,13 +22,14 @@ struct LaunchpadView: View {
                     }
                     .contextMenu {
                         Button("New Folder") { withAnimation(.spring(duration: 0.35)) { store.createFolder() } }
+                        Button("Add Application…") { store.chooseApps?() }
                         Button("Organize Apps…") { withAnimation(.spring(duration: 0.35)) { store.showingOrganizer = true } }
                         Divider()
                         Button("Settings…") { store.openSettings?() }
                     }
 
                 VStack(spacing: 0) {
-                    SearchField(text: $store.query, focused: $searchFocused)
+                    SearchField(text: $store.query, focused: $searchFocused, focusRequest: store.searchFocusRequest)
                         .padding(.top, layout.topInset)
                         .frame(height: layout.topInset + 44, alignment: .bottom)
 
@@ -99,15 +101,34 @@ struct LaunchpadView: View {
                     DragGhost(store: store, drag: drag)
                         .zIndex(10)
                 }
+
+                if dropTargeted {
+                    DropHint()
+                        .padding(.top, layout.topInset + 60)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .allowsHitTesting(false)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .zIndex(11)
+                }
             }
             .coordinateSpace(.named(launchpadSpace))
+            // Apps dragged in from Finder join the grid, wherever they live on disk.
+            .dropDestination(for: URL.self) { urls, _ in
+                let apps = urls.filter { $0.pathExtension == "app" }
+                guard !apps.isEmpty, store.openFolderID == nil, !store.showingOrganizer else { return false }
+                store.query = ""
+                withAnimation(.spring(duration: 0.35)) { _ = store.addApps(apps) }
+                return true
+            } isTargeted: { targeted in
+                withAnimation(.snappy(duration: 0.2)) { dropTargeted = targeted }
+            }
             .environment(\.launchpadNamespace, morph)
             .onAppear { store.viewportWidth = geo.size.width }
             .onChange(of: geo.size.width) { _, width in store.viewportWidth = width }
         }
         .ignoresSafeArea()
         // The field isn't focused up front, so no caret blinks in the empty bar; typing focuses it
-        // (see LauncherController.focusSearchForTyping) and clearing the search lets go again.
+        // (see LauncherController.typeIntoSearch) and clearing the search lets go again.
         .onChange(of: store.query) { _, query in if query.isEmpty { searchFocused = false } }
     }
 }
@@ -158,51 +179,103 @@ struct GridLayout {
     }
 }
 
+/// Shown while something is dragged in from Finder.
+private struct DropHint: View {
+    var body: some View {
+        Label("Drop apps to add them to Launchpad", systemImage: "plus.app")
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .launchpadGlass(.regular.tint(.white.opacity(0.14)), in: .capsule)
+            .environment(\.colorScheme, .dark)
+    }
+}
+
 // MARK: - Search
 
 struct SearchField: View {
     @Binding var text: String
     var focused: FocusState<Bool>.Binding
+    /// Changes when typing starts elsewhere; the field then takes focus with the caret after the typed text.
+    var focusRequest: Int
+    @State private var selection: TextSelection?
+    @State private var hovering = false
+    @Namespace private var glyph
+
+    private var active: Bool { focused.wrappedValue || !text.isEmpty }
 
     var body: some View {
-        // Launchpad's search: a compact rounded rectangle whose "Search" prompt sits centered until you type.
+        // Launchpad's search: a compact rounded rectangle whose "Search" prompt sits centered while idle,
+        // then slides to the leading edge once you click or type.
         ZStack {
-            if text.isEmpty {
+            if !active {
                 HStack(spacing: 5) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 12, weight: .regular))
+                    magnifier
                     Text("Search")
                         .font(.system(size: 13, weight: .regular))
                 }
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.white.opacity(hovering ? 0.75 : 0.6))
                 .allowsHitTesting(false)
             }
-            HStack(spacing: 5) {
-                if !text.isEmpty {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 12, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.6))
+            HStack(spacing: 6) {
+                if active {
+                    magnifier.foregroundStyle(.white.opacity(0.8))
                 }
-                TextField("", text: $text)
-                    .textFieldStyle(.plain)
-                    .focused(focused)
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(text.isEmpty ? .center : .leading)
+                ZStack(alignment: .leading) {
+                    if focused.wrappedValue && text.isEmpty {
+                        Text("Search")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .allowsHitTesting(false)
+                    }
+                    TextField("", text: $text, selection: $selection)
+                        .textFieldStyle(.plain)
+                        .focused(focused)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(.white)
+                }
                 if !text.isEmpty {
                     Button { text = "" } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 12))
+                            .font(.system(size: 13))
                             .foregroundStyle(.white.opacity(0.6))
+                            .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
+                    .help("Clear Search")
+                    .transition(.scale(scale: 0.5).combined(with: .opacity))
                 }
             }
         }
-        .padding(.horizontal, 8)
-        .frame(width: 240, height: 28)
-        .launchpadGlass(.regular.tint(.white.opacity(0.08)), in: .rect(cornerRadius: 8, style: .continuous))
+        .padding(.horizontal, 9)
+        .frame(width: 260, height: 30)
+        .contentShape(.rect(cornerRadius: 9, style: .continuous))
+        .launchpadGlass(.regular.tint(.white.opacity(active ? 0.16 : hovering ? 0.12 : 0.08)),
+                        in: .rect(cornerRadius: 9, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(.white.opacity(active ? 0.28 : 0), lineWidth: 1)
+        )
+        .onHover { hovering = $0 }
+        .animation(.snappy(duration: 0.22), value: active)
+        .animation(.snappy(duration: 0.18), value: text.isEmpty)
+        .animation(.easeOut(duration: 0.15), value: hovering)
+        .onChange(of: focusRequest) { focusAtEnd() }
+        // Focusing a text field selects its contents; put the caret after them so the next key appends.
+        .onChange(of: focused.wrappedValue) { _, isFocused in if isFocused { selection = TextSelection(insertionPoint: text.endIndex) } }
         .environment(\.colorScheme, .dark)
+    }
+
+    private var magnifier: some View {
+        Image(systemName: "magnifyingglass")
+            .font(.system(size: 12, weight: .medium))
+            .matchedGeometryEffect(id: "magnifier", in: glyph)
+    }
+
+    private func focusAtEnd() {
+        selection = TextSelection(insertionPoint: text.endIndex)
+        focused.wrappedValue = true
     }
 }
 
@@ -213,10 +286,17 @@ struct SearchResults: View {
     var body: some View {
         let results = store.searchResults
         if results.isEmpty {
-            Text("No Results")
-                .font(.system(size: 20, weight: .regular))
-                .foregroundStyle(.white.opacity(0.6))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            VStack(spacing: 6) {
+                Text("No Results")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+                Text("No apps match \u{201C}\(store.query.trimmingCharacters(in: .whitespaces))\u{201D}")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: 400)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
                 LazyVGrid(columns: Array(repeating: GridItem(.fixed(layout.cell.width), spacing: 0), count: layout.columns), spacing: 0) {

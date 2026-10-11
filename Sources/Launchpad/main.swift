@@ -26,6 +26,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !atLogin { launcher.show() }
     }
 
+    /// An app dropped on our Dock icon, or opened with Launchpad from Finder: add it and show where it landed.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard !store.addApps(urls).isEmpty else { return }
+        if !launcher.isVisible { launcher.show() }
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         // Clicking the Dock icon toggles the launcher.
         launcher.toggle()

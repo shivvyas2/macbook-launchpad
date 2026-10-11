@@ -11,6 +11,8 @@ final class LaunchpadStore {
     // Transient UI state
     var query = "" { didSet { if query != oldValue { selection = 0 } } }
     var selection = 0
+    /// Bumped when typing starts while the search field isn't focused; the view focuses it in response.
+    var searchFocusRequest = 0
     var currentPage = 0
     var swipeOffset: CGFloat = 0
     var openFolderID: UUID?
@@ -38,11 +40,16 @@ final class LaunchpadStore {
     private(set) var hiddenApps: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "hiddenApps") ?? []) {
         didSet { UserDefaults.standard.set(Array(hiddenApps), forKey: "hiddenApps") }
     }
+    /// Apps outside the scanned folders that the user added from Finder (see `addApps`).
+    private(set) var addedApps: [String] = UserDefaults.standard.stringArray(forKey: "addedApps") ?? [] {
+        didSet { UserDefaults.standard.set(addedApps, forKey: "addedApps") }
+    }
     var editingFolderName = false
     var showingOrganizer = false
 
     var dismiss: (() -> Void)?
     var openSettings: (() -> Void)?
+    var chooseApps: (() -> Void)?
 
     private let layoutURL: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -93,7 +100,9 @@ final class LaunchpadStore {
 
     /// Rescans the disk and reconciles the saved layout: drops uninstalled apps, appends new ones.
     func reload() {
-        let scanned = AppScanner.scan().filter { !hiddenApps.contains($0.id) }
+        var seen = Set<String>()
+        let scanned = (AppScanner.scan() + addedApps.compactMap { AppScanner.app(at: URL(fileURLWithPath: $0)) })
+            .filter { !hiddenApps.contains($0.id) && seen.insert($0.id).inserted }
         apps = Dictionary(scanned.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
 
         var placed = Set<String>()
@@ -128,6 +137,24 @@ final class LaunchpadStore {
     func save() {
         guard persistsLayout, let data = try? JSONEncoder().encode(entries) else { return }
         try? data.write(to: layoutURL, options: .atomic)
+    }
+
+    /// Puts apps from anywhere on disk (dropped from Finder, opened with Launchpad, or picked in a panel) on the
+    /// grid, and turns to the page of the last one. Returns the paths that were added or were already there.
+    @discardableResult
+    func addApps(_ urls: [URL]) -> [String] {
+        let me = Bundle.main.bundleURL.resolvingSymlinksInPath().path
+        let ids = urls.compactMap { AppScanner.app(at: $0)?.id }.filter { $0 != me }
+        guard !ids.isEmpty else { return [] }
+        hiddenApps.subtract(ids)
+        let scanned = Set(AppScanner.scan().map(\.id))
+        for id in ids where !scanned.contains(id) && !addedApps.contains(id) { addedApps.append(id) }
+        reload()
+        if let last = ids.last,
+           let index = entries.firstIndex(where: { $0.id == last || $0.folder?.apps.contains(last) == true }) {
+            currentPage = index / perPage
+        }
+        return ids
     }
 
     func hide(_ app: AppInfo) {
