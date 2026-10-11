@@ -21,6 +21,7 @@ final class LaunchpadStore {
     var isEditing = false
 
     // Geometry the drag engine hit-tests against. Not observed: views never read these.
+    @ObservationIgnored let pointer = DragPointer()
     @ObservationIgnored var cellFrames: [String: CGRect] = [:]
     @ObservationIgnored var folderPanelFrame: CGRect = .zero
     @ObservationIgnored var viewportWidth: CGFloat = 1440

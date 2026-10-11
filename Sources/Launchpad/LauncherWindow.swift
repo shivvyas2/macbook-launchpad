@@ -97,7 +97,7 @@ final class LauncherController {
         panel.makeKeyAndOrderFront(nil)
         DispatchQueue.main.async { [panel] in (panel.contentView as? ClearGlassView)?.stripTint() }
         installMonitors()
-        withAnimation(.spring(duration: 0.35, bounce: 0.15)) { store.isShown = true }
+        withAnimation(.snappy(duration: 0.3)) { store.isShown = true }
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.18
             panel.animator().alphaValue = 1
@@ -165,15 +165,15 @@ final class LauncherController {
             if store.drag != nil { store.cancelDrag() }
             else if store.showingOrganizer { withAnimation(.spring(duration: 0.3)) { store.showingOrganizer = false } }
             else if store.isEditing { withAnimation(.spring(duration: 0.3)) { store.isEditing = false } }
-            else if store.openFolderID != nil { withAnimation(.spring(duration: 0.45, bounce: 0.12)) { store.closeFolder() } }
+            else if store.openFolderID != nil { withAnimation(.spring(duration: 0.34, bounce: 0.05)) { store.closeFolder() } }
             else if searching { store.query = "" }
             else { hide() }
             return true
         case kVK_LeftArrow where !searching && !store.editingFolderName:
-            withAnimation(.spring(duration: 0.4, bounce: 0.1)) { store.goToPage(store.currentPage - 1) }
+            withAnimation(.snappy(duration: 0.32)) { store.goToPage(store.currentPage - 1) }
             return true
         case kVK_RightArrow where !searching && !store.editingFolderName:
-            withAnimation(.spring(duration: 0.4, bounce: 0.1)) { store.goToPage(store.currentPage + 1) }
+            withAnimation(.snappy(duration: 0.32)) { store.goToPage(store.currentPage + 1) }
             return true
         case kVK_LeftArrow where searching: return moveSelection(-1)
         case kVK_RightArrow where searching: return moveSelection(1)
@@ -219,7 +219,7 @@ final class LauncherController {
                 let threshold = width * 0.12
                 var target = store.currentPage
                 if swipeAccum < -threshold { target += 1 } else if swipeAccum > threshold { target -= 1 }
-                withAnimation(.spring(duration: 0.4, bounce: 0.1)) {
+                withAnimation(.snappy(duration: 0.32)) {
                     store.goToPage(target)
                     store.swipeOffset = 0
                 }
@@ -231,7 +231,7 @@ final class LauncherController {
         let delta = event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.scrollingDeltaX
         guard abs(delta) > 0.5, Date().timeIntervalSince(lastWheelPage) > 0.35 else { return true }
         lastWheelPage = Date()
-        withAnimation(.spring(duration: 0.4, bounce: 0.1)) { store.goToPage(store.currentPage + (delta < 0 ? 1 : -1)) }
+        withAnimation(.snappy(duration: 0.32)) { store.goToPage(store.currentPage + (delta < 0 ? 1 : -1)) }
         return true
     }
 }

@@ -44,11 +44,19 @@ struct LaunchpadView: View {
                         .opacity(store.query.isEmpty && store.pageCount > 1 ? 1 : 0)
                         .frame(height: layout.bottomInset)
                 }
-                .scaleEffect(store.isShown ? (store.openFolderID != nil ? 0.97 : 1) : 1.07)
+                .scaleEffect(store.isShown ? (store.openFolderID != nil ? 0.96 : 1) : 1.06)
                 .opacity(store.isShown ? 1 : 0)
-                .blur(radius: store.openFolderID != nil || store.showingOrganizer ? 14 : 0)
                 // Blur can't be captured offscreen, so screenshots fade the grid behind overlays instead.
                 .opacity(Screenshots.isRendering && (store.openFolderID != nil || store.showingOrganizer) ? 0.03 : 1)
+
+                // Behind folders and the organizer: a material layer that the window server blurs. Fading its
+                // opacity is far cheaper than animating a SwiftUI blur over the whole grid.
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .environment(\.colorScheme, .dark)
+                    .opacity(!Screenshots.isRendering && (store.openFolderID != nil || store.showingOrganizer) ? 1 : 0)
+                    .allowsHitTesting(false)
+                    .ignoresSafeArea()
 
                 if let folder = store.openFolder {
                     // The panel's glass and icons morph out of the folder icon (matched geometry);
@@ -217,15 +225,26 @@ struct PagedGrid: View {
     let width: CGFloat
 
     var body: some View {
+        PageStrip(store: store, layout: layout, width: width)
+            .offset(x: -CGFloat(store.currentPage) * width + store.swipeOffset)
+            .frame(width: width, alignment: .leading)
+            .padding(.top, 30)
+    }
+}
+
+/// All pages side by side. Split out from PagedGrid so swipe offsets don't re-render the icons.
+private struct PageStrip: View {
+    let store: LaunchpadStore
+    let layout: GridLayout
+    let width: CGFloat
+
+    var body: some View {
         HStack(spacing: 0) {
             ForEach(0..<store.pageCount, id: \.self) { page in
                 PageView(store: store, entries: Array(store.page(page)), layout: layout)
                     .frame(width: width)
             }
         }
-        .offset(x: -CGFloat(store.currentPage) * width + store.swipeOffset)
-        .frame(width: width, alignment: .leading)
-        .padding(.top, 30)
     }
 }
 
@@ -293,7 +312,7 @@ struct EntryCell: View {
         case .app(let path):
             if let app = store.apps[path] { store.launch(app) }
         case .folder(let folder):
-            withAnimation(.spring(duration: 0.5, bounce: 0.18)) { store.openFolderID = folder.id }
+            withAnimation(.spring(duration: 0.4, bounce: 0.12)) { store.openFolderID = folder.id }
         }
     }
 
@@ -358,7 +377,6 @@ struct AppCell: View {
                     .frame(width: iconSize, height: iconSize)
                     .matched(matchID, in: morph)
                     .scaleEffect(mergeTarget ? 0.7 : (hovering ? 1.05 : 1))
-                    .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
             }
             .frame(width: iconSize * 1.15, height: iconSize * 1.15)
             Text(app.name)
@@ -501,7 +519,7 @@ struct FolderOverlay: View {
         ZStack {
             Color.black.opacity(0.2)
                 .contentShape(Rectangle())
-                .onTapGesture { withAnimation(.spring(duration: 0.45, bounce: 0.12)) { store.closeFolder() } }
+                .onTapGesture { withAnimation(.spring(duration: 0.34, bounce: 0.05)) { store.closeFolder() } }
 
             VStack(spacing: 18) {
                 TextField("Folder Name", text: Binding(
@@ -597,7 +615,7 @@ struct PageDots: View {
                     .frame(width: 7, height: 7)
                     .contentShape(Rectangle().inset(by: -6))
                     .onTapGesture {
-                        withAnimation(.spring(duration: 0.4, bounce: 0.1)) { store.goToPage(page) }
+                        withAnimation(.snappy(duration: 0.32)) { store.goToPage(page) }
                     }
             }
         }

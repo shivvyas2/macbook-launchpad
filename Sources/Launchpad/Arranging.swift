@@ -9,12 +9,16 @@ struct DragState: Equatable {
 
     var id: String              // top-level entry id, or the app path when dragging inside a folder
     var source: Source
-    var location: CGPoint       // pointer, in the "launchpad" coordinate space
     var grabOffset: CGSize      // icon center minus pointer
     var iconSize: CGFloat
-    var settling = false        // true while the icon glides into its final slot
+}
 
-    var iconCenter: CGPoint { CGPoint(x: location.x + grabOffset.width, y: location.y + grabOffset.height) }
+/// The pointer during a drag. Kept apart from the store's other state so that moving the mouse only
+/// re-renders the floating icon, never the grid.
+@MainActor @Observable
+final class DragPointer {
+    var location: CGPoint = .zero   // in the "launchpad" coordinate space
+    var settling = false            // true while the icon glides into its final slot
 }
 
 /// Coordinate space shared by the drag gesture, cell frames and the floating icon.
@@ -42,24 +46,23 @@ extension LaunchpadStore {
         let frame = cellFrames[Self.frameKey(id, inFolder: inFolder)] ?? CGRect(origin: start, size: .zero)
         let center = Self.iconCenter(in: frame, iconSize: iconSize)
         folderTargetID = nil
-        withAnimation(.spring(duration: 0.25, bounce: 0.2)) {
-            drag = DragState(id: id, source: source, location: start,
-                             grabOffset: CGSize(width: center.x - start.x, height: center.y - start.y), iconSize: iconSize)
-            isEditing = true
-        }
+        pointer.location = start
+        pointer.settling = false
+        drag = DragState(id: id, source: source,
+                         grabOffset: CGSize(width: center.x - start.x, height: center.y - start.y), iconSize: iconSize)
+        if !isEditing { withAnimation(.snappy(duration: 0.25)) { isEditing = true } }
     }
 
     func updateDrag(to point: CGPoint) {
-        guard var current = drag, !current.settling else { return }
-        current.location = point
-        drag = current
+        guard let current = drag, !pointer.settling else { return }
+        pointer.location = point
 
         switch current.source {
         case .folder(let folderID):
             // Leaving the panel pulls the app out onto the grid and closes the folder, like the original.
             if folderPanelFrame != .zero, !folderPanelFrame.insetBy(dx: -16, dy: -16).contains(point) {
                 cancelPending()
-                withAnimation(.spring(duration: 0.45, bounce: 0.15)) {
+                withAnimation(.spring(duration: 0.38, bounce: 0.1)) {
                     removeFromFolder(folderID, app: current.id)
                     closeFolder()
                 }
@@ -68,7 +71,7 @@ extension LaunchpadStore {
             }
             guard let target = hit(point, inFolder: true), target != current.id else { cancelPending(); return }
             schedule("f:\(target)", after: 0.12) { [weak self] in
-                withAnimation(.spring(duration: 0.35, bounce: 0.15)) { self?.moveInFolder(folderID, app: current.id, to: target) }
+                withAnimation(.snappy(duration: 0.28)) { self?.moveInFolder(folderID, app: current.id, to: target) }
             }
 
         case .grid:
@@ -77,7 +80,7 @@ extension LaunchpadStore {
                 let direction = point.x < 56 ? -1 : 1
                 schedule("edge\(direction)", after: 0.6, repeats: true) { [weak self] in
                     guard let self else { return }
-                    withAnimation(.spring(duration: 0.45, bounce: 0.1)) { self.goToPage(self.currentPage + direction) }
+                    withAnimation(.snappy(duration: 0.32)) { self.goToPage(self.currentPage + direction) }
                 }
                 return
             }
@@ -87,7 +90,7 @@ extension LaunchpadStore {
                     clearFolderTarget()
                     schedule("end\(currentPage)", after: 0.25) { [weak self] in
                         guard let self else { return }
-                        withAnimation(.spring(duration: 0.35, bounce: 0.15)) { self.moveToEnd(current.id, page: self.currentPage) }
+                        withAnimation(.snappy(duration: 0.28)) { self.moveToEnd(current.id, page: self.currentPage) }
                     }
                 } else {
                     cancelPending()
@@ -100,12 +103,12 @@ extension LaunchpadStore {
             let draggingApp = !current.id.hasPrefix("folder:")
             if draggingApp && relativeX > 0.25 && relativeX < 0.75 {
                 schedule("merge:\(target)", after: 0.3) { [weak self] in
-                    withAnimation(.spring(duration: 0.3, bounce: 0.25)) { self?.folderTargetID = target }
+                    withAnimation(.snappy(duration: 0.22, extraBounce: 0.1)) { self?.folderTargetID = target }
                 }
             } else {
                 clearFolderTarget()
                 schedule("move:\(target)", after: 0.15) { [weak self] in
-                    withAnimation(.spring(duration: 0.4, bounce: 0.15)) { self?.move(current.id, to: target) }
+                    withAnimation(.snappy(duration: 0.28)) { self?.move(current.id, to: target) }
                 }
             }
         }
@@ -117,7 +120,7 @@ extension LaunchpadStore {
         var landing = cellFrames[Self.frameKey(current.id, inFolder: current.source != .grid)]
         if current.source == .grid, let target = folderTargetID {
             landing = cellFrames[Self.frameKey(target, inFolder: false)]
-            withAnimation(.spring(duration: 0.4, bounce: 0.2)) { merge(current.id, into: target) }
+            withAnimation(.snappy(duration: 0.3, extraBounce: 0.08)) { merge(current.id, into: target) }
         }
         folderTargetID = nil
         save()
@@ -125,18 +128,21 @@ extension LaunchpadStore {
         // Glide the floating icon into its slot, then hand over to the real cell.
         guard let landing else { drag = nil; return }
         let center = Self.iconCenter(in: landing, iconSize: current.iconSize)
-        withAnimation(.spring(duration: 0.28, bounce: 0.1)) {
-            drag?.settling = true
-            drag?.location = CGPoint(x: center.x - current.grabOffset.width, y: center.y - current.grabOffset.height)
+        withAnimation(.snappy(duration: 0.2)) {
+            pointer.settling = true
+            pointer.location = CGPoint(x: center.x - current.grabOffset.width, y: center.y - current.grabOffset.height)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) { [weak self] in
-            if self?.drag?.settling == true { self?.drag = nil }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self, self.pointer.settling else { return }
+            self.drag = nil
+            self.pointer.settling = false
         }
     }
 
     func cancelDrag() {
         cancelPending()
         drag = nil
+        pointer.settling = false
         folderTargetID = nil
     }
 
@@ -244,6 +250,8 @@ struct DragGhost: View {
     let drag: DragState
 
     var body: some View {
+        let pointer = store.pointer
+        let center = CGPoint(x: pointer.location.x + drag.grabOffset.width, y: pointer.location.y + drag.grabOffset.height)
         Group {
             if drag.id.hasPrefix("folder:"), let folder = store.entries.lazy.compactMap(\.folder).first(where: { "folder:" + $0.id.uuidString == drag.id }) {
                 FolderIcon(store: store, folder: folder, size: drag.iconSize, matched: false)
@@ -254,9 +262,8 @@ struct DragGhost: View {
                     .frame(width: drag.iconSize, height: drag.iconSize)
             }
         }
-        .scaleEffect(drag.settling ? 1 : 1.12)
-        .shadow(color: .black.opacity(drag.settling ? 0.25 : 0.4), radius: drag.settling ? 6 : 16, y: drag.settling ? 3 : 10)
-        .position(drag.iconCenter)
+        .scaleEffect(pointer.settling ? 1 : 1.1)
+        .position(center)
         .allowsHitTesting(false)
     }
 }

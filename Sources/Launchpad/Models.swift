@@ -94,10 +94,29 @@ final class IconCache {
     static let shared = IconCache()
     private var cache: [String: NSImage] = [:]
 
+    /// A 256-pt (512 px) bitmap of the app icon with its drop shadow baked in. Bitmaps with no live
+    /// effects are cheap for the compositor to move, scale and fade at full frame rate.
     func icon(for path: String) -> NSImage {
         if let image = cache[path] { return image }
-        let image = NSWorkspace.shared.icon(forFile: path)
-        image.size = NSSize(width: 256, height: 256)
+        let source = NSWorkspace.shared.icon(forFile: path)
+        let points: CGFloat = 256, scale: CGFloat = 2
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(points * scale), pixelsHigh: Int(points * scale),
+                                   bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                   colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        rep.size = NSSize(width: points, height: points)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.current?.imageInterpolation = .high
+        // The shadow fits inside the icon's built-in margin (macOS icons use 824 of 1024 points).
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.28)
+        shadow.shadowBlurRadius = points * 0.04
+        shadow.shadowOffset = NSSize(width: 0, height: -points * 0.018)
+        shadow.set()
+        source.draw(in: NSRect(x: 0, y: 0, width: points, height: points))
+        NSGraphicsContext.restoreGraphicsState()
+        let image = NSImage(size: rep.size)
+        image.addRepresentation(rep)
         cache[path] = image
         return image
     }
