@@ -77,9 +77,10 @@ struct LaunchpadView: View {
                     }
                     CircleButton(symbol: "gearshape.fill", help: "Settings") { store.openSettings?() }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                // Top-right, centered on the search bar's row (field is 34pt tall at the bottom of a 44pt band).
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 .padding(.trailing, 28)
-                .padding(.bottom, store.screenInsets.bottom + 20)
+                .padding(.top, layout.topInset + 44 - 17 - 20)
                 .opacity(store.isShown && store.openFolderID == nil && !store.showingOrganizer ? 1 : 0)
             }
             // Catch-all so a drag released anywhere always ends cleanly.
@@ -344,16 +345,16 @@ struct AppCell: View {
         VStack(spacing: 7) {
             ZStack {
                 if mergeTarget {
-                    RoundedRectangle(cornerRadius: iconSize * 0.26)
-                        .fill(.clear)
-                        .frame(width: iconSize * 1.15, height: iconSize * 1.15)
-                        .glassEffect(.regular, in: .rect(cornerRadius: iconSize * 0.26))
+                    // Same shape the new folder will have, so the icon sits concentrically inside it.
+                    Color.clear
+                        .frame(width: iconSize, height: iconSize)
+                        .glassEffect(.regular, in: .rect(cornerRadius: iconSize * 0.24, style: .continuous))
                 }
                 Image(nsImage: IconCache.shared.icon(for: app.id))
                     .resizable()
                     .interpolation(.high)
                     .frame(width: iconSize, height: iconSize)
-                    .scaleEffect(mergeTarget ? 0.82 : (hovering ? 1.05 : 1))
+                    .scaleEffect(mergeTarget ? 0.7 : (hovering ? 1.05 : 1))
                     .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
             }
             .frame(width: iconSize * 1.15, height: iconSize * 1.15)
@@ -382,17 +383,55 @@ struct FolderIcon: View {
     let size: CGFloat
 
     var body: some View {
-        let mini = size * 0.22
-        LazyVGrid(columns: Array(repeating: GridItem(.fixed(mini), spacing: size * 0.05), count: 3), spacing: size * 0.05) {
-            ForEach(folder.apps.prefix(9), id: \.self) { path in
-                Image(nsImage: IconCache.shared.icon(for: path))
-                    .resizable()
-                    .frame(width: mini, height: mini)
+        // Concentric geometry: each tile's corner radius is the folder's radius minus the padding,
+        // so the inner corners run parallel to the outer ones.
+        // Solve for the padding p that makes both hold:
+        //   tileRadius = outerRadius - p          (concentric corners)
+        //   tileRadius = k * tile                 (tiles keep an app-icon squircle shape)
+        //   tile = (side - 2p - 2 * gap) / 3
+        let side = size * 0.86
+        let outerRadius = side * 0.24
+        let gap = side * 0.045
+        let k: CGFloat = 0.33
+        let padding = (outerRadius - k * (side - 2 * gap) / 3) / (1 - 2 * k / 3)
+        let tile = (side - padding * 2 - gap * 2) / 3
+        let tileRadius = outerRadius - padding
+        let apps = Array(folder.apps.prefix(9))
+
+        VStack(spacing: gap) {
+            ForEach(0..<3, id: \.self) { row in
+                HStack(spacing: gap) {
+                    ForEach(0..<3, id: \.self) { col in
+                        let i = row * 3 + col
+                        if i < apps.count {
+                            MiniIcon(path: apps[i], size: tile, radius: tileRadius)
+                        } else {
+                            Color.clear.frame(width: tile, height: tile)
+                        }
+                    }
+                }
             }
         }
-        .frame(width: size * 0.86, height: size * 0.86)
-        .glassEffect(.regular, in: .rect(cornerRadius: size * 0.24))
+        .frame(width: side, height: side) // grid fills from the top-left, like the original
+        .glassEffect(.regular, in: .rect(cornerRadius: outerRadius, style: .continuous))
         .frame(width: size, height: size)
+    }
+}
+
+/// An app icon with its built-in transparent margin trimmed, clipped to a given corner radius.
+struct MiniIcon: View {
+    let path: String
+    let size: CGFloat
+    let radius: CGFloat
+
+    var body: some View {
+        Image(nsImage: IconCache.shared.icon(for: path))
+            .resizable()
+            .interpolation(.high)
+            // macOS icons draw their body in 824 of 1024 points; scale that body to fill the tile.
+            .frame(width: size * 1024 / 824, height: size * 1024 / 824)
+            .frame(width: size, height: size)
+            .clipShape(.rect(cornerRadius: radius, style: .continuous))
     }
 }
 
@@ -432,8 +471,13 @@ struct FolderOverlay: View {
     @State private var addingApps = false
 
     var body: some View {
-        let columns = min(max(folder.apps.count, 3), layout.columns - 1, 6)
+        // Square-ish rows, at least 3 across: 7 apps → 3 + 3 + 1, 16 → 4 x 4, 30 → 6 x 5.
+        let count = max(folder.apps.count, 1)
+        let maxColumns = max(3, min(6, layout.columns - 1))
+        let columns = min(count, min(maxColumns, max(3, Int(Double(count).squareRoot().rounded(.up)))))
         let cell = CGSize(width: min(layout.cell.width, 150), height: min(layout.cell.height, 150))
+        let totalRows = (folder.apps.count + columns - 1) / columns
+        let visibleRows = max(1, min(totalRows, Int(layout.gridSize.height * 0.7 / cell.height)))
         ZStack {
             Color.black.opacity(0.2)
                 .contentShape(Rectangle())
@@ -497,10 +541,10 @@ struct FolderOverlay: View {
                     }
                 }
                 .scrollIndicators(.never)
-                .frame(height: min(CGFloat((folder.apps.count + columns - 1) / columns), 3) * cell.height)
+                .frame(height: CGFloat(visibleRows) * cell.height)
             }
             .padding(30)
-            .frame(width: min(max(CGFloat(columns) * cell.width + 60, addingApps ? 600 : 0), layout.gridSize.width + 160))
+            .frame(width: min(max(CGFloat(columns) * cell.width + 60, addingApps ? 600 : 420), layout.gridSize.width + 160))
             .glassEffect(.regular, in: .rect(cornerRadius: 40))
             .environment(\.colorScheme, .dark)
         }
