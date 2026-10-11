@@ -29,6 +29,8 @@ final class LaunchpadStore {
     @ObservationIgnored var viewportWidth: CGFloat = 1440
     @ObservationIgnored var pendingWork: DispatchWorkItem?
     @ObservationIgnored var pendingKey: String?
+    /// Drives a drag after its gesture's view is gone (an app pulled out of a folder; see Arranging.swift).
+    @ObservationIgnored var mouseFollower: Any?
     var isShown = false
     var screenInsets = EdgeInsets()
 

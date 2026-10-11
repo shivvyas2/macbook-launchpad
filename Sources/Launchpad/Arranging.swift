@@ -67,6 +67,10 @@ extension LaunchpadStore {
                     closeFolder()
                 }
                 drag?.source = .grid
+                // Closing the folder removes the cell that owns the drag gesture, and SwiftUI then cancels
+                // the gesture without calling onEnded: the icon would freeze in mid-air until Launchpad
+                // closed. Keep the drag going from window-level mouse events instead.
+                followMouseUntilRelease()
                 return
             }
             guard let target = hit(point, inFolder: true), target != current.id else { cancelPending(); return }
@@ -110,6 +114,7 @@ extension LaunchpadStore {
 
     func endDrag() {
         cancelPending()
+        stopFollowingMouse()
         guard let current = drag else { return }
         var landing = cellFrames[Self.frameKey(current.id, inFolder: current.source != .grid)]
         if current.source == .grid, let target = folderTargetID {
@@ -135,12 +140,33 @@ extension LaunchpadStore {
 
     func cancelDrag() {
         cancelPending()
+        stopFollowingMouse()
         drag = nil
         pointer.settling = false
         folderTargetID = nil
     }
 
     // MARK: Helpers
+
+    /// Feeds the drag from the window's own mouse events until the button is released.
+    private func followMouseUntilRelease() {
+        guard mouseFollower == nil else { return }
+        mouseFollower = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak self] event in
+            MainActor.assumeIsolated {
+                guard let self, self.drag != nil, let content = event.window?.contentView else { return }
+                // The launchpad space is the full-screen content view with a top-left origin.
+                let p = content.convert(event.locationInWindow, from: nil)
+                let point = CGPoint(x: p.x, y: content.isFlipped ? p.y : content.bounds.height - p.y)
+                if event.type == .leftMouseUp { self.endDrag() } else { self.updateDrag(to: point) }
+            }
+            return event
+        }
+    }
+
+    private func stopFollowingMouse() {
+        if let mouseFollower { NSEvent.removeMonitor(mouseFollower) }
+        mouseFollower = nil
+    }
 
     private func hit(_ point: CGPoint, inFolder: Bool) -> String? {
         let prefix = inFolder ? "f:" : "g:"
