@@ -14,8 +14,18 @@ final class LaunchpadStore {
     var currentPage = 0
     var swipeOffset: CGFloat = 0
     var openFolderID: UUID?
-    var draggingID: String?
     var folderTargetID: String?
+    /// The icon being dragged, if any (see Arranging.swift).
+    var drag: DragState?
+    /// Jiggle mode: icons wiggle and clicks don't launch, like the original Launchpad.
+    var isEditing = false
+
+    // Geometry the drag engine hit-tests against. Not observed: views never read these.
+    @ObservationIgnored var cellFrames: [String: CGRect] = [:]
+    @ObservationIgnored var folderPanelFrame: CGRect = .zero
+    @ObservationIgnored var viewportWidth: CGFloat = 1440
+    @ObservationIgnored var pendingWork: DispatchWorkItem?
+    @ObservationIgnored var pendingKey: String?
     var isShown = false
     var screenInsets = EdgeInsets()
 
@@ -64,7 +74,11 @@ final class LaunchpadStore {
 
     // MARK: Loading
 
-    init() {
+    /// False for throwaway stores (screenshots) that must never overwrite the user's layout.
+    let persistsLayout: Bool
+
+    init(persistsLayout: Bool = true) {
+        self.persistsLayout = persistsLayout
         if let data = try? Data(contentsOf: layoutURL),
            let saved = try? JSONDecoder().decode([LayoutEntry].self, from: data) {
             entries = saved
@@ -99,8 +113,15 @@ final class LaunchpadStore {
         currentPage = min(currentPage, pageCount - 1)
     }
 
+    /// Replaces the arrangement in memory (screenshots use this with a non-persisting store).
+    func showLayout(_ layout: [LayoutEntry]) {
+        entries = layout
+        currentPage = 0
+        save()
+    }
+
     func save() {
-        guard let data = try? JSONEncoder().encode(entries) else { return }
+        guard persistsLayout, let data = try? JSONEncoder().encode(entries) else { return }
         try? data.write(to: layoutURL, options: .atomic)
     }
 

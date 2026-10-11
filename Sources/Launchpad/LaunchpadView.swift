@@ -1,9 +1,9 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct LaunchpadView: View {
     @Bindable var store: LaunchpadStore
     @FocusState private var searchFocused: Bool
+    @Namespace private var morph
     private var prefs: Preferences { .shared }
 
     var body: some View {
@@ -14,7 +14,11 @@ struct LaunchpadView: View {
                 // The window itself is frosted glass over the screen. Tapping empty space closes the launcher.
                 Color.clear
                     .contentShape(Rectangle())
-                    .onTapGesture { store.dismiss?() }
+                    .onTapGesture {
+                        // Like the original: a click on empty space first ends jiggle mode, then closes.
+                        if store.isEditing { withAnimation(.spring(duration: 0.3)) { store.isEditing = false } }
+                        else { store.dismiss?() }
+                    }
                     .contextMenu {
                         Button("New Folder") { withAnimation(.spring(duration: 0.35)) { store.createFolder() } }
                         Button("Organize Apps…") { withAnimation(.spring(duration: 0.35)) { store.showingOrganizer = true } }
@@ -40,17 +44,17 @@ struct LaunchpadView: View {
                         .opacity(store.query.isEmpty && store.pageCount > 1 ? 1 : 0)
                         .frame(height: layout.bottomInset)
                 }
-                .scaleEffect(store.isShown ? 1 : 1.07)
+                .scaleEffect(store.isShown ? (store.openFolderID != nil ? 0.97 : 1) : 1.07)
                 .opacity(store.isShown ? 1 : 0)
                 .blur(radius: store.openFolderID != nil || store.showingOrganizer ? 14 : 0)
-
-                if store.draggingID != nil && store.query.isEmpty && store.openFolderID == nil {
-                    EdgeFlipZones(store: store)
-                }
+                // Blur can't be captured offscreen, so screenshots fade the grid behind overlays instead.
+                .opacity(Screenshots.isRendering && (store.openFolderID != nil || store.showingOrganizer) ? 0.03 : 1)
 
                 if let folder = store.openFolder {
+                    // The panel's glass and icons morph out of the folder icon (matched geometry);
+                    // everything else simply fades.
                     FolderOverlay(store: store, folder: folder, layout: layout)
-                        .transition(.scale(scale: 0.85).combined(with: .opacity))
+                        .transition(.opacity)
                         .zIndex(2)
                 }
 
@@ -82,9 +86,16 @@ struct LaunchpadView: View {
                 .padding(.trailing, 28)
                 .padding(.top, layout.topInset + 44 - 17 - 20)
                 .opacity(store.isShown && store.openFolderID == nil && !store.showingOrganizer ? 1 : 0)
+
+                if let drag = store.drag {
+                    DragGhost(store: store, drag: drag)
+                        .zIndex(10)
+                }
             }
-            // Catch-all so a drag released anywhere always ends cleanly.
-            .onDrop(of: [.text], delegate: EndDragDelegate(store: store))
+            .coordinateSpace(.named(launchpadSpace))
+            .environment(\.launchpadNamespace, morph)
+            .onAppear { store.viewportWidth = geo.size.width }
+            .onChange(of: geo.size.width) { _, width in store.viewportWidth = width }
         }
         .ignoresSafeArea()
         .onChange(of: store.isShown) { _, shown in if shown { searchFocused = true } }
@@ -162,7 +173,7 @@ struct SearchField: View {
         }
         .padding(.horizontal, 12)
         .frame(width: 290, height: 34)
-        .glassEffect(.regular.tint(.white.opacity(0.08)), in: .capsule)
+        .launchpadGlass(.regular.tint(.white.opacity(0.08)), in: .capsule)
         .environment(\.colorScheme, .dark)
     }
 }
@@ -249,19 +260,18 @@ struct EntryCell: View {
 
     var body: some View {
         let isTarget = store.folderTargetID == entry.id
+        let isDragged = store.drag?.id == entry.id
         content(isTarget: isTarget)
+            .wiggle(store.isEditing && !isDragged, seed: entry.id)
             .frame(width: layout.cell.width, height: layout.cell.height)
             .contentShape(Rectangle())
-            .opacity(store.draggingID == entry.id ? 0.3 : 1)
-            .onTapGesture { open() }
-            .onDrag {
-                store.draggingID = entry.id
-                store.folderTargetID = nil
-                return NSItemProvider(object: entry.id as NSString)
-            } preview: {
-                dragPreview
-            }
-            .onDrop(of: [.text], delegate: GridDropDelegate(store: store, target: entry, cell: layout.cell))
+            .opacity(isDragged ? 0 : 1) // the floating copy stands in while dragging
+            .onTapGesture { if !store.isEditing { open() } }
+            .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                withAnimation(.spring(duration: 0.3)) { store.isEditing = true }
+            })
+            .arrangeGesture(store, id: entry.id, source: .grid, iconSize: layout.iconSize)
+            .reportsFrame(LaunchpadStore.frameKey(entry.id, inFolder: false), to: store)
             .contextMenu { menu }
     }
 
@@ -273,18 +283,8 @@ struct EntryCell: View {
                 AppCell(app: app, iconSize: layout.iconSize, highlighted: false, mergeTarget: isTarget)
             }
         case .folder(let folder):
-            FolderCell(store: store, folder: folder, iconSize: layout.iconSize, highlighted: isTarget)
-        }
-    }
-
-    @ViewBuilder
-    private var dragPreview: some View {
-        switch entry {
-        case .app(let path):
-            Image(nsImage: IconCache.shared.icon(for: path))
-                .resizable().frame(width: layout.iconSize, height: layout.iconSize)
-        case .folder(let folder):
-            FolderIcon(store: store, folder: folder, size: layout.iconSize)
+            FolderCell(store: store, folder: folder, iconSize: layout.iconSize, highlighted: isTarget,
+                       isOpen: store.openFolderID == folder.id)
         }
     }
 
@@ -293,7 +293,7 @@ struct EntryCell: View {
         case .app(let path):
             if let app = store.apps[path] { store.launch(app) }
         case .folder(let folder):
-            withAnimation(.spring(duration: 0.35, bounce: 0.15)) { store.openFolderID = folder.id }
+            withAnimation(.spring(duration: 0.5, bounce: 0.18)) { store.openFolderID = folder.id }
         }
     }
 
@@ -339,7 +339,9 @@ struct AppCell: View {
     let iconSize: CGFloat
     var highlighted = false
     var mergeTarget = false
+    var matchID: String? = nil
     @State private var hovering = false
+    @Environment(\.launchpadNamespace) private var morph
 
     var body: some View {
         VStack(spacing: 7) {
@@ -348,12 +350,13 @@ struct AppCell: View {
                     // Same shape the new folder will have, so the icon sits concentrically inside it.
                     Color.clear
                         .frame(width: iconSize, height: iconSize)
-                        .glassEffect(.regular, in: .rect(cornerRadius: iconSize * 0.24, style: .continuous))
+                        .launchpadGlass(.regular, in: .rect(cornerRadius: iconSize * 0.24, style: .continuous))
                 }
                 Image(nsImage: IconCache.shared.icon(for: app.id))
                     .resizable()
                     .interpolation(.high)
                     .frame(width: iconSize, height: iconSize)
+                    .matched(matchID, in: morph)
                     .scaleEffect(mergeTarget ? 0.7 : (hovering ? 1.05 : 1))
                     .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
             }
@@ -381,6 +384,9 @@ struct FolderIcon: View {
     let store: LaunchpadStore
     let folder: Folder
     let size: CGFloat
+    /// Whether this copy takes part in the open/close morph (the drag ghost doesn't).
+    var matched = true
+    @Environment(\.launchpadNamespace) private var morph
 
     var body: some View {
         // Concentric geometry: each tile's corner radius is the folder's radius minus the padding,
@@ -405,6 +411,7 @@ struct FolderIcon: View {
                         let i = row * 3 + col
                         if i < apps.count {
                             MiniIcon(path: apps[i], size: tile, radius: tileRadius)
+                                .matched(matched ? "app-" + apps[i] : nil, in: morph)
                         } else {
                             Color.clear.frame(width: tile, height: tile)
                         }
@@ -413,7 +420,11 @@ struct FolderIcon: View {
             }
         }
         .frame(width: side, height: side) // grid fills from the top-left, like the original
-        .glassEffect(.regular, in: .rect(cornerRadius: outerRadius, style: .continuous))
+        .background {
+            Color.clear
+                .matched(matched ? "folder-" + folder.id.uuidString : nil, in: morph)
+                .launchpadGlass(.regular, in: .rect(cornerRadius: outerRadius, style: .continuous))
+        }
         .frame(width: size, height: size)
     }
 }
@@ -440,13 +451,21 @@ struct FolderCell: View {
     let folder: Folder
     let iconSize: CGFloat
     var highlighted = false
+    var isOpen = false
     @State private var hovering = false
 
     var body: some View {
         VStack(spacing: 7) {
-            FolderIcon(store: store, folder: folder, size: iconSize)
-                .scaleEffect(highlighted ? 1.15 : (hovering ? 1.05 : 1))
-                .frame(width: iconSize * 1.15, height: iconSize * 1.15)
+            Group {
+                // While open, the icon lives on as the panel; leave its slot empty.
+                if isOpen {
+                    Color.clear.frame(width: iconSize, height: iconSize)
+                } else {
+                    FolderIcon(store: store, folder: folder, size: iconSize)
+                }
+            }
+            .scaleEffect(highlighted ? 1.15 : (hovering ? 1.05 : 1))
+            .frame(width: iconSize * 1.15, height: iconSize * 1.15)
             Text(folder.name)
                 .font(.system(size: min(13.5, max(10.5, iconSize * 0.155)), weight: .medium))
                 .foregroundStyle(.white)
@@ -469,6 +488,7 @@ struct FolderOverlay: View {
     let layout: GridLayout
     @FocusState private var nameFocused: Bool
     @State private var addingApps = false
+    @Environment(\.launchpadNamespace) private var morph
 
     var body: some View {
         // Square-ish rows, at least 3 across: 7 apps → 3 + 3 + 1, 16 → 4 x 4, 30 → 6 x 5.
@@ -481,8 +501,7 @@ struct FolderOverlay: View {
         ZStack {
             Color.black.opacity(0.2)
                 .contentShape(Rectangle())
-                .onTapGesture { withAnimation(.spring(duration: 0.3)) { store.closeFolder() } }
-                .onDrop(of: [.text], delegate: FolderExitDropDelegate(store: store, folderID: folder.id))
+                .onTapGesture { withAnimation(.spring(duration: 0.45, bounce: 0.12)) { store.closeFolder() } }
 
             VStack(spacing: 18) {
                 TextField("Folder Name", text: Binding(
@@ -502,7 +521,7 @@ struct FolderOverlay: View {
                             .frame(width: 30, height: 30)
                     }
                     .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive(), in: .circle)
+                    .launchpadGlass(.regular.interactive(), in: .circle)
                     .help(addingApps ? "Done Adding" : "Add Apps")
                     .offset(x: 44)
                 }
@@ -522,19 +541,18 @@ struct FolderOverlay: View {
                     LazyVGrid(columns: Array(repeating: GridItem(.fixed(cell.width), spacing: 0), count: columns), spacing: 0) {
                         ForEach(folder.apps, id: \.self) { path in
                             if let app = store.apps[path] {
-                                AppCell(app: app, iconSize: min(layout.iconSize, cell.width * 0.7))
+                                let size = min(layout.iconSize, cell.width * 0.7)
+                                AppCell(app: app, iconSize: size, matchID: "app-" + path)
+                                    .wiggle(store.isEditing && store.drag?.id != path, seed: path)
                                     .frame(width: cell.width, height: cell.height)
                                     .contentShape(Rectangle())
-                                    .opacity(store.draggingID == path ? 0.3 : 1)
-                                    .onTapGesture { store.launch(app) }
-                                    .onDrag {
-                                        store.draggingID = path
-                                        return NSItemProvider(object: path as NSString)
-                                    } preview: {
-                                        Image(nsImage: IconCache.shared.icon(for: path))
-                                            .resizable().frame(width: layout.iconSize, height: layout.iconSize)
-                                    }
-                                    .onDrop(of: [.text], delegate: FolderReorderDelegate(store: store, folderID: folder.id, target: path))
+                                    .opacity(store.drag?.id == path ? 0 : 1)
+                                    .onTapGesture { if !store.isEditing { store.launch(app) } }
+                                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                        withAnimation(.spring(duration: 0.3)) { store.isEditing = true }
+                                    })
+                                    .arrangeGesture(store, id: path, source: .folder(folder.id), iconSize: size)
+                                    .reportsFrame(LaunchpadStore.frameKey(path, inFolder: true), to: store)
                                     .contextMenu { AppMenu(store: store, app: app, folderID: folder.id) }
                             }
                         }
@@ -545,7 +563,14 @@ struct FolderOverlay: View {
             }
             .padding(30)
             .frame(width: min(max(CGFloat(columns) * cell.width + 60, addingApps ? 600 : 420), layout.gridSize.width + 160))
-            .glassEffect(.regular, in: .rect(cornerRadius: 40))
+            .background {
+                // Grows out of the folder icon's glass when opening, and shrinks back into it when closing.
+                Color.clear
+                    .matched("folder-" + folder.id.uuidString, in: morph)
+                    .launchpadGlass(.regular, in: .rect(cornerRadius: 40, style: .continuous))
+            }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(launchpadSpace)) } action: { store.folderPanelFrame = $0 }
+            .onDisappear { store.folderPanelFrame = .zero }
             .environment(\.colorScheme, .dark)
         }
         .onChange(of: nameFocused) { _, focused in store.editingFolderName = focused }
@@ -593,26 +618,19 @@ struct CircleButton: View {
                 .frame(width: 40, height: 40)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: .circle)
+        .launchpadGlass(.regular.interactive(), in: .circle)
         .help(help)
     }
 }
 
-/// Invisible strips at the screen edges that flip pages while dragging over them.
-struct EdgeFlipZones: View {
-    let store: LaunchpadStore
-
-    var body: some View {
-        HStack {
-            zone(-1)
-            Spacer()
-            zone(1)
+extension View {
+    /// matchedGeometryEffect when both an id and a namespace are available.
+    @ViewBuilder
+    func matched(_ id: String?, in namespace: Namespace.ID?) -> some View {
+        if let id, let namespace {
+            matchedGeometryEffect(id: id, in: namespace)
+        } else {
+            self
         }
-    }
-
-    private func zone(_ direction: Int) -> some View {
-        Color.white.opacity(0.001)
-            .frame(width: 70)
-            .onDrop(of: [.text], delegate: EdgeFlipDelegate(store: store, direction: direction))
     }
 }

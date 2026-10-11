@@ -119,6 +119,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+if let i = CommandLine.arguments.firstIndex(of: "--render-screenshots"), i + 1 < CommandLine.arguments.count {
+    let folder = URL(fileURLWithPath: CommandLine.arguments[i + 1])
+    MainActor.assumeIsolated { Screenshots.render(to: folder) }
+    exit(0)
+}
+
 let app = NSApplication.shared
 let delegate = MainActor.assumeIsolated { AppDelegate() }
 app.delegate = delegate

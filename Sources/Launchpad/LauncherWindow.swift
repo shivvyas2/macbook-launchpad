@@ -16,6 +16,7 @@ final class LauncherController {
     private var swipeAccum: CGFloat = 0
     private var lastWheelPage = Date.distantPast
     private var hiding = false
+    private var optionJiggle = false
 
     var isVisible: Bool { panel.isVisible && !hiding }
 
@@ -107,6 +108,8 @@ final class LauncherController {
         guard panel.isVisible, !hiding else { return }
         hiding = true
         removeMonitors()
+        store.cancelDrag()
+        store.isEditing = false
         store.closeFolder()
         withAnimation(.easeIn(duration: 0.16)) { store.isShown = false }
         NSAnimationContext.runAnimationGroup({ ctx in
@@ -133,6 +136,16 @@ final class LauncherController {
             guard let self, event.window === self.panel else { return event }
             return self.handleKey(event) ? nil : event
         } as Any)
+        // Holding Option jiggles the icons, like the original Launchpad.
+        monitors.append(NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            guard let self, event.window === self.panel, !self.store.editingFolderName else { return event }
+            let option = event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .option
+            if option != self.optionJiggle, self.store.drag == nil {
+                self.optionJiggle = option
+                withAnimation(.spring(duration: 0.3)) { self.store.isEditing = option }
+            }
+            return event
+        } as Any)
         monitors.append(NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
             guard let self, event.window === self.panel else { return event }
             return self.handleScroll(event) ? nil : event
@@ -149,8 +162,10 @@ final class LauncherController {
         let columns = store.gridColumns
         switch Int(event.keyCode) {
         case kVK_Escape:
-            if store.showingOrganizer { withAnimation(.spring(duration: 0.3)) { store.showingOrganizer = false } }
-            else if store.openFolderID != nil { withAnimation(.spring(duration: 0.3)) { store.closeFolder() } }
+            if store.drag != nil { store.cancelDrag() }
+            else if store.showingOrganizer { withAnimation(.spring(duration: 0.3)) { store.showingOrganizer = false } }
+            else if store.isEditing { withAnimation(.spring(duration: 0.3)) { store.isEditing = false } }
+            else if store.openFolderID != nil { withAnimation(.spring(duration: 0.45, bounce: 0.12)) { store.closeFolder() } }
             else if searching { store.query = "" }
             else { hide() }
             return true

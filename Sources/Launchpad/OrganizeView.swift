@@ -66,7 +66,7 @@ struct OrganizeOverlay: View {
             .padding(28)
             .frame(maxWidth: 600)
             .padding(.horizontal, 24)
-            .glassEffect(.regular, in: .rect(cornerRadius: 32))
+            .launchpadGlass(.regular, in: .rect(cornerRadius: 32))
             .environment(\.colorScheme, .dark)
         }
         .onAppear(perform: rebuild)
@@ -192,7 +192,7 @@ struct UndoToast: View {
         .padding(.leading, 16)
         .padding(.trailing, 8)
         .padding(.vertical, 8)
-        .glassEffect(.regular, in: .capsule)
+        .launchpadGlass(.regular, in: .capsule)
         .environment(\.colorScheme, .dark)
         .task {
             try? await Task.sleep(for: .seconds(10))
