@@ -261,7 +261,7 @@ private struct PageStrip: View {
     var body: some View {
         HStack(spacing: 0) {
             ForEach(0..<store.pageCount, id: \.self) { page in
-                PageView(store: store, entries: Array(store.page(page)), layout: layout)
+                PageView(store: store, page: page, entries: Array(store.page(page)), layout: layout)
                     .frame(width: width)
             }
         }
@@ -270,6 +270,7 @@ private struct PageStrip: View {
 
 struct PageView: View {
     let store: LaunchpadStore
+    let page: Int
     let entries: [LayoutEntry]
     let layout: GridLayout
 
@@ -288,6 +289,8 @@ struct PageView: View {
                 }
             }
         }
+        // The exact slot grid, so drags can snap to slots (including empty ones).
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(launchpadSpace)) } action: { store.pageGridFrames[page] = $0 }
         .frame(maxHeight: .infinity, alignment: .top)
     }
 }
@@ -302,9 +305,11 @@ struct EntryCell: View {
         let isDragged = store.drag?.id == entry.id
         content(isTarget: isTarget)
             .wiggle(store.isEditing && !isDragged, seed: entry.id)
-            .frame(width: layout.cell.width, height: layout.cell.height)
-            .contentShape(Rectangle())
             .opacity(isDragged ? 0 : 1) // the floating copy stands in while dragging
+            .frame(width: layout.cell.width, height: layout.cell.height)
+            // Where the dragged icon will land when released.
+            .overlay { if isDragged && store.folderTargetID == nil { LandingSlot(iconSize: layout.iconSize) } }
+            .contentShape(Rectangle())
             .onTapGesture { if !store.isEditing { open() } }
             .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
                 withAnimation(.spring(duration: 0.3)) { store.isEditing = true }
@@ -582,9 +587,10 @@ struct FolderOverlay: View {
                                 let size = min(layout.iconSize, cell.width * 0.7)
                                 AppCell(app: app, iconSize: size, matchID: "app-" + path)
                                     .wiggle(store.isEditing && store.drag?.id != path, seed: path)
-                                    .frame(width: cell.width, height: cell.height)
-                                    .contentShape(Rectangle())
                                     .opacity(store.drag?.id == path ? 0 : 1)
+                                    .frame(width: cell.width, height: cell.height)
+                                    .overlay { if store.drag?.id == path { LandingSlot(iconSize: size) } }
+                                    .contentShape(Rectangle())
                                     .onTapGesture { if !store.isEditing { store.launch(app) } }
                                     .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
                                         withAnimation(.spring(duration: 0.3)) { store.isEditing = true }
@@ -670,5 +676,22 @@ extension View {
         } else {
             self
         }
+    }
+}
+
+/// A soft outline marking the slot a dragged icon will snap into.
+struct LandingSlot: View {
+    let iconSize: CGFloat
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: iconSize * 0.225, style: .continuous)
+        shape
+            .fill(.white.opacity(0.1))
+            .overlay(shape.strokeBorder(.white.opacity(0.35), lineWidth: 1.5))
+            .frame(width: iconSize * 0.84, height: iconSize * 0.84)
+            // Same spot as the icon in a cell (the label sits below it).
+            .offset(y: -(7 + iconSize * 0.155 * 1.25) / 2)
+            .transition(.opacity)
+            .allowsHitTesting(false)
     }
 }

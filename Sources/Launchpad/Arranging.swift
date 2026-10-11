@@ -84,31 +84,25 @@ extension LaunchpadStore {
                 }
                 return
             }
-            guard let target = hit(point, inFolder: false), let frame = cellFrames[Self.frameKey(target, inFolder: false)] else {
-                // Past the last icon on a page: move to the end of that page.
-                if gridArea.contains(point), let lastFrame = lastFrameOnPage, point.y > lastFrame.minY || point.x > lastFrame.maxX {
-                    clearFolderTarget()
-                    schedule("end\(currentPage)", after: 0.25) { [weak self] in
-                        guard let self else { return }
-                        withAnimation(.snappy(duration: 0.28)) { self.moveToEnd(current.id, page: self.currentPage) }
-                    }
-                } else {
-                    cancelPending()
-                }
-                return
-            }
-            guard target != current.id else { cancelPending(); clearFolderTarget(); return }
-            // Over the middle of an icon: make (or add to) a folder. Over its sides: take its place.
-            let relativeX = (point.x - frame.minX) / frame.width
-            let draggingApp = !current.id.hasPrefix("folder:")
-            if draggingApp && relativeX > 0.25 && relativeX < 0.75 {
-                schedule("merge:\(target)", after: 0.3) { [weak self] in
-                    withAnimation(.snappy(duration: 0.22, extraBounce: 0.1)) { self?.folderTargetID = target }
+            // Targets are grid slots, not icons: the slot under the pointer (empty ones included) is where
+            // the icon will land. Icons only make room once the pointer rests, so you can pick a place first.
+            guard let slot = slot(at: point) else { cancelPending(); clearFolderTarget(); return }
+            let occupant = slot.index < entries.count ? entries[slot.index].id : nil
+            guard occupant != current.id else { cancelPending(); clearFolderTarget(); return }
+
+            let rx = (point.x - slot.rect.minX) / slot.rect.width
+            let ry = (point.y - slot.rect.minY) / slot.rect.height
+            let overIcon = rx > 0.25 && rx < 0.75 && ry > 0.08 && ry < 0.7
+            if let occupant, overIcon, !current.id.hasPrefix("folder:") {
+                // Resting on an icon's face makes (or adds to) a folder.
+                schedule("merge:\(occupant)", after: 0.4) { [weak self] in
+                    withAnimation(.snappy(duration: 0.22, extraBounce: 0.1)) { self?.folderTargetID = occupant }
                 }
             } else {
                 clearFolderTarget()
-                schedule("move:\(target)", after: 0.15) { [weak self] in
-                    withAnimation(.snappy(duration: 0.28)) { self?.move(current.id, to: target) }
+                let index = min(slot.index, entries.count - 1)
+                schedule("slot:\(index)", after: 0.22) { [weak self] in
+                    withAnimation(.snappy(duration: 0.3)) { self?.moveEntry(current.id, toIndex: index) }
                 }
             }
         }
@@ -155,18 +149,16 @@ extension LaunchpadStore {
         }.map { String($0.key.dropFirst(2)) }
     }
 
-    /// Union of the visible page's cells, used to detect drops in the empty space after the last icon.
-    private var gridArea: CGRect {
-        visiblePageFrames.reduce(CGRect.null) { $0.union($1) }.insetBy(dx: 0, dy: -40)
-    }
-
-    private var lastFrameOnPage: CGRect? {
-        let ids = page(currentPage).map(\.id)
-        return ids.last.flatMap { cellFrames[Self.frameKey($0, inFolder: false)] }
-    }
-
-    private var visiblePageFrames: [CGRect] {
-        page(currentPage).compactMap { cellFrames[Self.frameKey($0.id, inFolder: false)] }
+    /// The grid slot under a point on the current page: its index in `entries` and its rectangle.
+    /// Points a little outside the grid clamp to the nearest edge slot.
+    private func slot(at point: CGPoint) -> (index: Int, rect: CGRect)? {
+        guard let grid = pageGridFrames[currentPage], grid.insetBy(dx: -48, dy: -48).contains(point) else { return nil }
+        let cellWidth = grid.width / CGFloat(gridColumns), cellHeight = grid.height / CGFloat(gridRows)
+        let column = min(max(Int((point.x - grid.minX) / cellWidth), 0), gridColumns - 1)
+        let row = min(max(Int((point.y - grid.minY) / cellHeight), 0), gridRows - 1)
+        let rect = CGRect(x: grid.minX + CGFloat(column) * cellWidth, y: grid.minY + CGFloat(row) * cellHeight,
+                          width: cellWidth, height: cellHeight)
+        return (currentPage * perPage + row * gridColumns + column, rect)
     }
 
     private func clearFolderTarget() {

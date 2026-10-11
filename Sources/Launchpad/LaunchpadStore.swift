@@ -23,6 +23,8 @@ final class LaunchpadStore {
     // Geometry the drag engine hit-tests against. Not observed: views never read these.
     @ObservationIgnored let pointer = DragPointer()
     @ObservationIgnored var cellFrames: [String: CGRect] = [:]
+    /// Each page's icon grid (columns x rows of slots), for snapping drags to slots.
+    @ObservationIgnored var pageGridFrames: [Int: CGRect] = [:]
     @ObservationIgnored var folderPanelFrame: CGRect = .zero
     @ObservationIgnored var viewportWidth: CGFloat = 1440
     @ObservationIgnored var pendingWork: DispatchWorkItem?
@@ -202,17 +204,19 @@ final class LaunchpadStore {
     func index(of id: String) -> Int? { entries.firstIndex { $0.id == id } }
 
     /// Moves the dragged top-level entry to the slot currently held by `targetID`.
-    func move(_ id: String, to targetID: String) {
-        guard id != targetID, let from = index(of: id), let to = index(of: targetID) else { return }
+    /// Moves a top-level entry to a slot index (clamped to the end of the list).
+    func moveEntry(_ id: String, toIndex target: Int) {
+        guard let from = index(of: id) else { return }
+        let to = max(0, min(target, entries.count - 1))
+        guard from != to else { return }
         let entry = entries.remove(at: from)
         entries.insert(entry, at: to)
     }
 
-    func moveToEnd(_ id: String, page: Int) {
-        guard let from = index(of: id) else { return }
+    func move(_ id: String, to targetID: String) {
+        guard id != targetID, let from = index(of: id), let to = index(of: targetID) else { return }
         let entry = entries.remove(at: from)
-        let end = min(entries.count, (page + 1) * perPage - 1)
-        entries.insert(entry, at: max(0, end))
+        entries.insert(entry, at: to)
     }
 
     /// Drops the dragged app onto another app (creating a folder) or onto a folder (adding to it).
