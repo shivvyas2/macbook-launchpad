@@ -95,6 +95,7 @@ final class LauncherController {
         // macOS only lets the menu bar hide together with the Dock; the Dock still slides up on hover.
         NSApp.presentationOptions = [.autoHideMenuBar, .autoHideDock]
         panel.makeKeyAndOrderFront(nil)
+        panel.makeFirstResponder(nil) // keep the search field idle until the user types
         DispatchQueue.main.async { [panel] in (panel.contentView as? ClearGlassView)?.stripTint() }
         installMonitors()
         withAnimation(.snappy(duration: 0.3)) { store.isShown = true }
@@ -166,7 +167,7 @@ final class LauncherController {
             else if store.showingOrganizer { withAnimation(.spring(duration: 0.3)) { store.showingOrganizer = false } }
             else if store.isEditing { withAnimation(.spring(duration: 0.3)) { store.isEditing = false } }
             else if store.openFolderID != nil { withAnimation(.spring(duration: 0.34, bounce: 0.05)) { store.closeFolder() } }
-            else if searching { store.query = "" }
+            else if searching { store.query = ""; panel.makeFirstResponder(nil) }
             else { hide() }
             return true
         case kVK_LeftArrow where !searching && !store.editingFolderName:
@@ -190,8 +191,28 @@ final class LauncherController {
             hide()
             return true
         default:
+            focusSearchForTyping(event)
             return false
         }
+    }
+
+    /// Type-to-search: the first printable key focuses the search field, then passes through to it.
+    private func focusSearchForTyping(_ event: NSEvent) {
+        guard !(panel.firstResponder is NSText), // a field is already being edited
+              store.openFolderID == nil, !store.showingOrganizer,
+              event.modifierFlags.intersection([.command, .control]).isEmpty,
+              let chars = event.characters, !chars.isEmpty,
+              chars.unicodeScalars.allSatisfy({ !CharacterSet.whitespacesAndNewlines.union(.controlCharacters).contains($0) }),
+              !(0xF700...0xF8FF).contains(chars.unicodeScalars.first!.value), // function / arrow keys
+              let field = Self.firstTextField(in: panel.contentView)
+        else { return }
+        panel.makeFirstResponder(field)
+    }
+
+    private static func firstTextField(in view: NSView?) -> NSTextField? {
+        guard let view else { return nil }
+        if let field = view as? NSTextField, field.isEditable { return field }
+        return view.subviews.lazy.compactMap { firstTextField(in: $0) }.first
     }
 
     private func moveSelection(_ delta: Int) -> Bool {

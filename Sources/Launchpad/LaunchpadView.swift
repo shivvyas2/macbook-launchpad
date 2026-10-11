@@ -106,9 +106,9 @@ struct LaunchpadView: View {
             .onChange(of: geo.size.width) { _, width in store.viewportWidth = width }
         }
         .ignoresSafeArea()
-        .onChange(of: store.isShown) { _, shown in if shown { searchFocused = true } }
-        .onChange(of: store.openFolderID) { _, id in if id == nil { searchFocused = true } }
-        .onAppear { searchFocused = true }
+        // The field isn't focused up front, so no caret blinks in the empty bar; typing focuses it
+        // (see LauncherController.focusSearchForTyping) and clearing the search lets go again.
+        .onChange(of: store.query) { _, query in if query.isEmpty { searchFocused = false } }
     }
 }
 
