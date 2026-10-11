@@ -31,8 +31,11 @@ struct SettingsView: View {
             }
 
             Section("Layout") {
-                Stepper("Columns: \(prefs.columns)", value: $prefs.columns, in: 4...12)
-                Stepper("Rows: \(prefs.rows)", value: $prefs.rows, in: 3...8)
+                Toggle("Fit grid to screen", isOn: $prefs.autoGrid)
+                if !prefs.autoGrid {
+                    Stepper("Columns: \(prefs.columns)", value: $prefs.columns, in: 4...12)
+                    Stepper("Rows: \(prefs.rows)", value: $prefs.rows, in: 3...8)
+                }
                 LabeledContent("Icon size") {
                     Slider(value: $prefs.iconSize, in: 48...128, step: 4)
                         .frame(width: 200)

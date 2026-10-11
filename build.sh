@@ -19,8 +19,14 @@ if [[ ! -f build/AppIcon.icns ]]; then
 fi
 cp build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
-codesign --force --sign - "$APP"
-echo "Built $APP"
+# Sign with Developer ID + hardened runtime when available (needed for notarization), else ad-hoc.
+IDENTITY=$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -1)
+if [[ -n "$IDENTITY" ]]; then
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+else
+    codesign --force --sign - "$APP"
+fi
+echo "Built $APP (signed: ${IDENTITY:-ad-hoc})"
 
 case "${1:-}" in
 --install)
@@ -40,6 +46,16 @@ case "${1:-}" in
     ln -s /Applications "$STAGING/Applications"
     hdiutil create -volname "MacBook Launchpad" -srcfolder "$STAGING" -ov -format UDZO "$DMG" >/dev/null
     rm -rf "$STAGING"
+    if [[ -n "$IDENTITY" ]]; then
+        codesign --force --timestamp --sign "$IDENTITY" "$DMG"
+        # Notarize with credentials saved via: xcrun notarytool store-credentials notary ...
+        if xcrun notarytool history --keychain-profile notary >/dev/null 2>&1; then
+            xcrun notarytool submit "$DMG" --keychain-profile notary --wait
+            xcrun stapler staple "$DMG"
+        else
+            echo "Skipping notarization: no 'notary' keychain profile (see README)."
+        fi
+    fi
     # Version-free copy so https://.../releases/latest/download/MacBook-Launchpad.dmg always works
     cp "$DMG" build/MacBook-Launchpad.dmg
     shasum -a 256 "$DMG"

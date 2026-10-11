@@ -8,7 +8,8 @@ struct LaunchpadView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let layout = GridLayout(size: geo.size, insets: store.screenInsets, prefs: prefs)
+            let layout = GridLayout(size: geo.size, insets: store.screenInsets, columns: store.gridColumns,
+                                    rows: store.gridRows, maxIconSize: CGFloat(prefs.iconSize))
             ZStack {
                 // The window itself is frosted glass over the screen. Tapping empty space closes the launcher.
                 Color.clear
@@ -101,17 +102,39 @@ struct GridLayout {
     let topInset: CGFloat
     let bottomInset: CGFloat
 
-    @MainActor init(size: CGSize, insets: EdgeInsets, prefs: Preferences) {
-        columns = prefs.columns
-        rows = prefs.rows
-        topInset = insets.top + max(36, size.height * 0.05)
-        bottomInset = insets.bottom + 56
-        let horizontalPadding = size.width * 0.14
-        let available = CGSize(width: size.width - horizontalPadding * 2,
-                               height: size.height - topInset - 44 - bottomInset - 30)
-        cell = CGSize(width: available.width / CGFloat(columns), height: available.height / CGFloat(rows))
-        gridSize = available
-        iconSize = min(CGFloat(prefs.iconSize), cell.width * 0.78, cell.height * 0.68)
+    var labelSize: CGFloat { min(13.5, max(10.5, iconSize * 0.155)) }
+
+    init(size: CGSize, insets: EdgeInsets, columns: Int, rows: Int, maxIconSize: CGFloat) {
+        self.columns = columns
+        self.rows = rows
+        let area = Self.gridArea(size: size, insets: insets)
+        topInset = area.top
+        bottomInset = area.bottom
+        gridSize = area.size
+        cell = CGSize(width: area.size.width / CGFloat(columns), height: area.size.height / CGFloat(rows))
+        // Big displays get bigger icons rather than a denser grid.
+        let screenScale = min(max(area.size.height / 730, 1), 1.4)
+        iconSize = max(32, min(maxIconSize * screenScale, cell.width * 0.66, cell.height * 0.6))
+    }
+
+    /// The space the icon grid gets after the search bar, page dots and screen edges.
+    private static func gridArea(size: CGSize, insets: EdgeInsets) -> (size: CGSize, top: CGFloat, bottom: CGFloat) {
+        let top = insets.top + max(28, size.height * 0.045)
+        let bottom = insets.bottom + 56
+        let sidePadding = min(size.width * 0.12, 240)
+        let height = size.height - top - 44 - bottom - 30
+        return (CGSize(width: max(200, size.width - sidePadding * 2), height: max(150, height)), top, bottom)
+    }
+
+    /// Columns and rows for a screen: the Settings values, or a fit to the screen when "Fit grid to screen" is on.
+    @MainActor static func fittingGrid(size: CGSize, insets: EdgeInsets) -> (columns: Int, rows: Int) {
+        let prefs = Preferences.shared
+        guard prefs.autoGrid else { return (prefs.columns, prefs.rows) }
+        let area = gridArea(size: size, insets: insets)
+        // Aim for roughly the classic 7 x 5 Launchpad; small screens drop columns/rows, big ones add a little.
+        let columns = Int((area.size.width / 165).rounded())
+        let rows = Int((area.size.height / 150).rounded())
+        return (min(max(columns, 4), 8), min(max(rows, 3), 6))
     }
 }
 
@@ -335,14 +358,14 @@ struct AppCell: View {
             }
             .frame(width: iconSize * 1.15, height: iconSize * 1.15)
             Text(app.name)
-                .font(.system(size: 12.5, weight: .medium))
+                .font(.system(size: min(13.5, max(10.5, iconSize * 0.155)), weight: .medium))
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.6), radius: 2, y: 1)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .frame(maxWidth: iconSize * 1.5)
+                .frame(maxWidth: iconSize * 1.6)
         }
-        .padding(8)
+        .padding(6)
         .background {
             if highlighted {
                 RoundedRectangle(cornerRadius: 18).fill(.white.opacity(0.18))
@@ -386,14 +409,14 @@ struct FolderCell: View {
                 .scaleEffect(highlighted ? 1.15 : (hovering ? 1.05 : 1))
                 .frame(width: iconSize * 1.15, height: iconSize * 1.15)
             Text(folder.name)
-                .font(.system(size: 12.5, weight: .medium))
+                .font(.system(size: min(13.5, max(10.5, iconSize * 0.155)), weight: .medium))
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.6), radius: 2, y: 1)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .frame(maxWidth: iconSize * 1.5)
+                .frame(maxWidth: iconSize * 1.6)
         }
-        .padding(8)
+        .padding(6)
         .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
         .animation(.spring(duration: 0.25), value: highlighted)
     }
@@ -477,7 +500,7 @@ struct FolderOverlay: View {
                 .frame(height: min(CGFloat((folder.apps.count + columns - 1) / columns), 3) * cell.height)
             }
             .padding(30)
-            .frame(width: max(CGFloat(columns) * cell.width + 60, addingApps ? 600 : 0))
+            .frame(width: min(max(CGFloat(columns) * cell.width + 60, addingApps ? 600 : 0), layout.gridSize.width + 160))
             .glassEffect(.regular, in: .rect(cornerRadius: 40))
             .environment(\.colorScheme, .dark)
         }

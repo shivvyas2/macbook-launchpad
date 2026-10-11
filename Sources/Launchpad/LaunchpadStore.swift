@@ -36,7 +36,19 @@ final class LaunchpadStore {
         return dir.appendingPathComponent("layout.json")
     }()
 
-    var perPage: Int { max(1, Preferences.shared.columns * Preferences.shared.rows) }
+    /// Grid size for the current screen (see `GridLayout.fittingGrid`).
+    private(set) var gridColumns = 7
+    private(set) var gridRows = 5
+    var perPage: Int { max(1, gridColumns * gridRows) }
+
+    func setGrid(columns: Int, rows: Int) {
+        guard columns != gridColumns || rows != gridRows else { return }
+        // Keep the first app of the current page on screen.
+        let firstVisible = currentPage * perPage
+        gridColumns = columns
+        gridRows = rows
+        currentPage = min(firstVisible / perPage, pageCount - 1)
+    }
     var pageCount: Int { max(1, Int(ceil(Double(entries.count) / Double(perPage)))) }
 
     func page(_ index: Int) -> ArraySlice<LayoutEntry> {

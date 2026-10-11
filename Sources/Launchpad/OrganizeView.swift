@@ -64,7 +64,8 @@ struct OrganizeOverlay: View {
                 }
             }
             .padding(28)
-            .frame(width: 600)
+            .frame(maxWidth: 600)
+            .padding(.horizontal, 24)
             .glassEffect(.regular, in: .rect(cornerRadius: 32))
             .environment(\.colorScheme, .dark)
         }

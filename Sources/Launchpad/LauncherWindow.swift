@@ -36,9 +36,28 @@ final class LauncherController {
         panel.contentView = Self.blurredHost(LaunchpadView(store: store))
 
         store.dismiss = { [weak self] in self?.hide() }
+        NotificationCenter.default.addObserver(self, selector: #selector(screensChanged),
+                                               name: NSApplication.didChangeScreenParametersNotification, object: nil)
     }
 
     func toggle() { isVisible ? hide() : show() }
+
+    /// Sizes the window and the grid for a screen. Called on open and whenever displays change.
+    private func fit(to screen: NSScreen) {
+        panel.setFrame(screen.frame, display: true)
+        // The menu bar auto-hides while open, so only the camera notch (if any) limits the top.
+        // Measure the Dock before our presentation options hide it, and keep at least that much room.
+        let dock = max(screen.visibleFrame.minY - screen.frame.minY, store.screenInsets.bottom)
+        store.screenInsets = EdgeInsets(top: screen.safeAreaInsets.top, leading: 0, bottom: dock, trailing: 0)
+        let grid = GridLayout.fittingGrid(size: screen.frame.size, insets: store.screenInsets)
+        store.setGrid(columns: grid.columns, rows: grid.rows)
+    }
+
+    @objc private func screensChanged() {
+        guard isVisible else { return }
+        let screen = panel.screen ?? NSScreen.main ?? NSScreen.screens[0]
+        fit(to: screen)
+    }
 
     /// SwiftUI content over a frosted-glass blur of whatever is on screen behind the window.
     private static func blurredHost(_ view: some View) -> NSView {
@@ -60,7 +79,8 @@ final class LauncherController {
         hiding = false
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main ?? NSScreen.screens[0]
-        panel.setFrame(screen.frame, display: true)
+        store.screenInsets = EdgeInsets()
+        fit(to: screen)
 
         store.query = ""
         store.openFolderID = nil
@@ -68,15 +88,13 @@ final class LauncherController {
         store.clearUndo()
         store.swipeOffset = 0
         store.reload()
-        // The menu bar auto-hides while open, so only the camera notch (if any) limits the top.
-        store.screenInsets = EdgeInsets(top: screen.safeAreaInsets.top, leading: 0,
-                                        bottom: screen.visibleFrame.minY - screen.frame.minY, trailing: 0)
 
         panel.alphaValue = 0
         NSApp.activate()
         // macOS only lets the menu bar hide together with the Dock; the Dock still slides up on hover.
         NSApp.presentationOptions = [.autoHideMenuBar, .autoHideDock]
         panel.makeKeyAndOrderFront(nil)
+        DispatchQueue.main.async { [panel] in (panel.contentView as? ClearGlassView)?.stripTint() }
         installMonitors()
         withAnimation(.spring(duration: 0.35, bounce: 0.15)) { store.isShown = true }
         NSAnimationContext.runAnimationGroup { ctx in
@@ -128,7 +146,7 @@ final class LauncherController {
 
     private func handleKey(_ event: NSEvent) -> Bool {
         let searching = !store.query.isEmpty
-        let columns = Preferences.shared.columns
+        let columns = store.gridColumns
         switch Int(event.keyCode) {
         case kVK_Escape:
             if store.showingOrganizer { withAnimation(.spring(duration: 0.3)) { store.showingOrganizer = false } }
@@ -226,6 +244,12 @@ final class ClearGlassView: NSVisualEffectView {
         stripTint()
     }
 
+    // The material's layers are (re)built lazily when the view draws, so strip after every update.
+    override func updateLayer() {
+        super.updateLayer()
+        stripTint()
+    }
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         stripTint()
@@ -233,16 +257,22 @@ final class ClearGlassView: NSVisualEffectView {
 
     /// The material is a backdrop layer (blur + saturation) under "fill", "tone" and chameleon tint layers.
     /// Keep only the blur.
-    private func stripTint() {
-        guard let material = layer?.sublayers?.first else { return }
-        for sublayer in material.sublayers ?? [] {
-            if String(describing: type(of: sublayer)) == "CABackdropLayer" {
-                let filters = (sublayer.filters ?? []).compactMap { $0 as? NSObject }
-                let blur = filters.filter { ($0.value(forKey: "name") as? String) == "gaussianBlur" }
-                blur.forEach { $0.setValue(blurRadius, forKey: "inputRadius") }
-                if blur.count != filters.count { sublayer.filters = blur }
-            } else if !sublayer.isHidden {
-                sublayer.isHidden = true
+    /// Only the material layer (the one holding the CABackdropLayer) is touched; sibling layers,
+    /// like the SwiftUI content's, are left alone.
+    func stripTint() {
+        for material in layer?.sublayers ?? [] {
+            let parts = material.sublayers ?? []
+            guard parts.contains(where: { String(describing: type(of: $0)) == "CABackdropLayer" }) else { continue }
+            for part in parts {
+                let kind = String(describing: type(of: part))
+                if kind == "CABackdropLayer" {
+                    let filters = (part.filters ?? []).compactMap { $0 as? NSObject }
+                    let blur = filters.filter { ($0.value(forKey: "name") as? String) == "gaussianBlur" }
+                    blur.forEach { $0.setValue(blurRadius, forKey: "inputRadius") }
+                    if blur.count != filters.count { part.filters = blur }
+                } else if (part.name == "fill" || part.name == "tone" || kind.contains("Chameleon")) && !part.isHidden {
+                    part.isHidden = true
+                }
             }
         }
     }

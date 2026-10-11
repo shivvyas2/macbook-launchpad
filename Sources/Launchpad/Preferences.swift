@@ -80,6 +80,7 @@ final class Preferences {
     var hotCorner: ScreenCorner { didSet { defaults.set(hotCorner.rawValue, forKey: "hotCorner") } }
     var pinchEnabled: Bool { didSet { defaults.set(pinchEnabled, forKey: "pinchEnabled") } }
     var pinchFingers: Int { didSet { defaults.set(pinchFingers, forKey: "pinchFingers") } }
+    var autoGrid: Bool { didSet { defaults.set(autoGrid, forKey: "autoGrid") } }
     var columns: Int { didSet { defaults.set(columns, forKey: "columns") } }
     var rows: Int { didSet { defaults.set(rows, forKey: "rows") } }
     var iconSize: Double { didSet { defaults.set(iconSize, forKey: "iconSize") } }
@@ -91,6 +92,7 @@ final class Preferences {
             "hotCorner": ScreenCorner.none.rawValue,
             "pinchEnabled": true,
             "pinchFingers": 4,
+            "autoGrid": true,
             "columns": 7,
             "rows": 5,
             "iconSize": 88.0,
@@ -100,6 +102,7 @@ final class Preferences {
         hotCorner = ScreenCorner(rawValue: defaults.string(forKey: "hotCorner") ?? "") ?? .none
         pinchEnabled = defaults.bool(forKey: "pinchEnabled")
         pinchFingers = defaults.integer(forKey: "pinchFingers")
+        autoGrid = defaults.bool(forKey: "autoGrid")
         columns = defaults.integer(forKey: "columns")
         rows = defaults.integer(forKey: "rows")
         iconSize = defaults.double(forKey: "iconSize")
