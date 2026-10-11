@@ -92,7 +92,7 @@ struct LaunchpadView: View {
                 // Top-right, centered on the search bar's row (field is 34pt tall at the bottom of a 44pt band).
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 .padding(.trailing, 28)
-                .padding(.top, layout.topInset + 44 - 17 - 20)
+                .padding(.top, layout.topInset + 44 - 14 - 20)
                 .opacity(store.isShown && store.openFolderID == nil && !store.showingOrganizer ? 1 : 0)
 
                 if let drag = store.drag {
@@ -165,23 +165,43 @@ struct SearchField: View {
     var focused: FocusState<Bool>.Binding
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            TextField("Search", text: $text)
-                .textFieldStyle(.plain)
-                .focused(focused)
-                .font(.system(size: 15))
-            if !text.isEmpty {
-                Button { text = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+        // Launchpad's search: a compact rounded rectangle whose "Search" prompt sits centered until you type.
+        ZStack {
+            if text.isEmpty {
+                HStack(spacing: 5) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12, weight: .regular))
+                    Text("Search")
+                        .font(.system(size: 13, weight: .regular))
                 }
-                .buttonStyle(.plain)
+                .foregroundStyle(.white.opacity(0.6))
+                .allowsHitTesting(false)
+            }
+            HStack(spacing: 5) {
+                if !text.isEmpty {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                TextField("", text: $text)
+                    .textFieldStyle(.plain)
+                    .focused(focused)
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(text.isEmpty ? .center : .leading)
+                if !text.isEmpty {
+                    Button { text = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
-        .padding(.horizontal, 12)
-        .frame(width: 290, height: 34)
-        .launchpadGlass(.regular.tint(.white.opacity(0.08)), in: .capsule)
+        .padding(.horizontal, 8)
+        .frame(width: 240, height: 28)
+        .launchpadGlass(.regular.tint(.white.opacity(0.08)), in: .rect(cornerRadius: 8, style: .continuous))
         .environment(\.colorScheme, .dark)
     }
 }
@@ -194,7 +214,7 @@ struct SearchResults: View {
         let results = store.searchResults
         if results.isEmpty {
             Text("No Results")
-                .font(.title2.weight(.medium))
+                .font(.system(size: 20, weight: .regular))
                 .foregroundStyle(.white.opacity(0.6))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -380,11 +400,11 @@ struct AppCell: View {
             }
             .frame(width: iconSize * 1.15, height: iconSize * 1.15)
             Text(app.name)
-                .font(.system(size: min(13.5, max(10.5, iconSize * 0.155)), weight: .medium))
+                .font(.system(size: min(13, max(11, iconSize * 0.15)), weight: .regular))
                 .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.6), radius: 2, y: 1)
+                .shadow(color: .black.opacity(0.45), radius: 1.5, y: 1)
                 .lineLimit(1)
-                .truncationMode(.middle)
+                .truncationMode(.tail)
                 .frame(maxWidth: iconSize * 1.6)
         }
         .padding(6)
@@ -485,11 +505,11 @@ struct FolderCell: View {
             .scaleEffect(highlighted ? 1.15 : (hovering ? 1.05 : 1))
             .frame(width: iconSize * 1.15, height: iconSize * 1.15)
             Text(folder.name)
-                .font(.system(size: min(13.5, max(10.5, iconSize * 0.155)), weight: .medium))
+                .font(.system(size: min(13, max(11, iconSize * 0.15)), weight: .regular))
                 .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.6), radius: 2, y: 1)
+                .shadow(color: .black.opacity(0.45), radius: 1.5, y: 1)
                 .lineLimit(1)
-                .truncationMode(.middle)
+                .truncationMode(.tail)
                 .frame(maxWidth: iconSize * 1.6)
         }
         .padding(6)
@@ -528,7 +548,7 @@ struct FolderOverlay: View {
                 ))
                 .textFieldStyle(.plain)
                 .multilineTextAlignment(.center)
-                .font(.system(size: 26, weight: .semibold))
+                .font(.system(size: 24, weight: .regular))
                 .foregroundStyle(.white)
                 .focused($nameFocused)
                 .frame(maxWidth: 360)
