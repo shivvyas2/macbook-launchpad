@@ -229,18 +229,37 @@ extension View {
 private struct Wiggle: ViewModifier {
     let active: Bool
     let seed: String
-    @State private var tilted = false
+
+    private struct Pose {
+        var angle: Double = 0
+        var lift: Double = 0
+    }
 
     func body(content: Content) -> some View {
-        // A per-icon speed and direction so the grid doesn't jiggle in lockstep.
+        // Apple's jiggle: a small tilt (about 1.2°) on a roughly half-second cycle, with a slight vertical
+        // bob out of step with it. Each icon gets its own period and direction so the grid never moves in
+        // lockstep. Keyframes only drive the transform, so nothing is redrawn while it plays.
         let hash = abs(seed.hashValue)
-        let speed = 0.12 + Double(hash % 5) * 0.012
-        let angle = (hash % 2 == 0 ? 1.0 : -1.0) * 1.5
-        content
-            .rotationEffect(.degrees(active ? (tilted ? angle : -angle) : 0))
-            .animation(active ? .easeInOut(duration: speed).repeatForever(autoreverses: true) : .spring(duration: 0.2), value: tilted)
-            .onAppear { if active { tilted.toggle() } }
-            .onChange(of: active) { _, isActive in tilted = isActive ? !tilted : false }
+        let half = 0.23 + Double(hash % 7) * 0.008          // 0.23 to 0.28 s per swing
+        let tilt = (hash % 2 == 0 ? 1.0 : -1.0) * 1.2
+        let bob = 0.6
+        // When inactive the animator rests at the initial (upright) pose, without changing view identity.
+        content.keyframeAnimator(initialValue: Pose(), repeating: active) { view, pose in
+            view
+                .rotationEffect(.degrees(pose.angle))
+                .offset(y: pose.lift)
+        } keyframes: { _ in
+            KeyframeTrack(\.angle) {
+                CubicKeyframe(tilt, duration: half / 2)
+                CubicKeyframe(-tilt, duration: half)
+                CubicKeyframe(0, duration: half / 2)
+            }
+            KeyframeTrack(\.lift) {
+                CubicKeyframe(-bob, duration: half * 0.75)
+                CubicKeyframe(bob, duration: half)
+                CubicKeyframe(0, duration: half * 0.25)
+            }
+        }
     }
 }
 
