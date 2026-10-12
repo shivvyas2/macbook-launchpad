@@ -13,6 +13,7 @@
   <a href="https://github.com/shivvyas2/macbook-launchpad/releases/latest"><img src="https://img.shields.io/github/v/release/shivvyas2/macbook-launchpad?label=Download%20DMG&style=for-the-badge" alt="Download the latest DMG"></a>
   <img src="https://img.shields.io/badge/macOS-26%20Tahoe-blue?style=for-the-badge&logo=apple" alt="macOS 26 Tahoe">
   <img src="https://img.shields.io/badge/Apple%20Silicon%20%2B%20Intel-universal-555?style=for-the-badge" alt="Universal binary">
+  <img src="https://img.shields.io/badge/Notarized-by%20Apple-2ea043?style=for-the-badge&logo=apple" alt="Signed and notarized by Apple">
   <img src="https://img.shields.io/github/license/shivvyas2/macbook-launchpad?style=for-the-badge" alt="MIT license">
 </p>
 
@@ -26,15 +27,8 @@ It is completely free, has no ads, accounts, or tracking, and the full source co
 
 **[⬇ Download MacBook Launchpad (free DMG)](https://github.com/shivvyas2/macbook-launchpad/releases/latest/download/MacBook-Launchpad.dmg)** · [All releases](https://github.com/shivvyas2/macbook-launchpad/releases) · [Website](https://www.shivvyas.com/launchpad)
 
-1. Open `MacBook-Launchpad-<version>.dmg` and drag **Launchpad** into **Applications**.
-2. Open Launchpad from Applications. The first time, macOS will say it can't verify the developer — the app is open source but not notarized by Apple.
-3. Go to **System Settings › Privacy & Security**, scroll down, and click **Open Anyway**. You only need to do this once.
-
-Prefer the terminal? This does the same thing:
-
-```sh
-xattr -dr com.apple.quarantine /Applications/Launchpad.app
-```
+1. Open `MacBook-Launchpad.dmg` and drag **Launchpad** into **Applications**.
+2. Open Launchpad from Applications. That's it — the app is signed with a Developer ID and notarized by Apple, so it opens without any security warnings.
 
 **Requirements:** macOS 26 Tahoe or later, on Apple Silicon or Intel.
 
