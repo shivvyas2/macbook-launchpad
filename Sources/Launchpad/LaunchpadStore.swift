@@ -96,13 +96,43 @@ final class LaunchpadStore {
             entries = saved
         }
         reload()
+        if persistsLayout { IconCache.shared.prewarm(apps.keys.sorted()) }
     }
 
     /// Rescans the disk and reconciles the saved layout: drops uninstalled apps, appends new ones.
     func reload() {
+        apply(Self.installedApps(added: addedApps, hidden: hiddenApps))
+    }
+
+    @ObservationIgnored private var refreshGeneration = 0
+
+    /// Rescans off the main thread so opening the launcher never waits on the disk; the saved layout shows
+    /// immediately and any newly installed or removed apps appear a moment later.
+    func refreshInBackground() {
+        refreshGeneration += 1
+        let generation = refreshGeneration
+        let added = addedApps, hidden = hiddenApps
+        DispatchQueue.global(qos: .userInitiated).async {
+            let scanned = Self.installedApps(added: added, hidden: hidden)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    // A newer refresh or a synchronous reload supersedes this one; never reshuffle mid-drag.
+                    guard generation == self.refreshGeneration, self.drag == nil else { return }
+                    self.apply(scanned)
+                    IconCache.shared.prewarm(scanned.map(\.id))
+                }
+            }
+        }
+    }
+
+    nonisolated private static func installedApps(added: [String], hidden: Set<String>) -> [AppInfo] {
         var seen = Set<String>()
-        let scanned = (AppScanner.scan() + addedApps.compactMap { AppScanner.app(at: URL(fileURLWithPath: $0)) })
-            .filter { !hiddenApps.contains($0.id) && seen.insert($0.id).inserted }
+        return (AppScanner.scan() + added.compactMap { AppScanner.app(at: URL(fileURLWithPath: $0)) })
+            .filter { !hidden.contains($0.id) && seen.insert($0.id).inserted }
+    }
+
+    private func apply(_ scanned: [AppInfo]) {
+        refreshGeneration += 1 // results of any in-flight background scan are now stale
         apps = Dictionary(scanned.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
 
         var placed = Set<String>()

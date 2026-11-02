@@ -99,11 +99,36 @@ enum AppScanner {
 final class IconCache {
     static let shared = IconCache()
     private var cache: [String: NSImage] = [:]
+    private var queued = Set<String>()
+    private let renderQueue = DispatchQueue(label: "Launchpad.icons", qos: .utility)
 
     /// A 256-pt (512 px) bitmap of the app icon with its drop shadow baked in. Bitmaps with no live
     /// effects are cheap for the compositor to move, scale and fade at full frame rate.
     func icon(for path: String) -> NSImage {
         if let image = cache[path] { return image }
+        let image = Self.render(path)
+        cache[path] = image
+        return image
+    }
+
+    /// Renders icons in the background so the first open doesn't stall drawing every page on the main thread.
+    func prewarm(_ paths: [String]) {
+        let todo = paths.filter { cache[$0] == nil && queued.insert($0).inserted }
+        guard !todo.isEmpty else { return }
+        renderQueue.async {
+            for path in todo {
+                let image = Self.render(path)
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        self.queued.remove(path)
+                        if self.cache[path] == nil { self.cache[path] = image }
+                    }
+                }
+            }
+        }
+    }
+
+    nonisolated private static func render(_ path: String) -> NSImage {
         let source = NSWorkspace.shared.icon(forFile: path)
         let points: CGFloat = 256, scale: CGFloat = 2
         let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(points * scale), pixelsHigh: Int(points * scale),
@@ -123,9 +148,11 @@ final class IconCache {
         NSGraphicsContext.restoreGraphicsState()
         let image = NSImage(size: rep.size)
         image.addRepresentation(rep)
-        cache[path] = image
         return image
     }
 
-    func invalidate() { cache.removeAll() }
+    func invalidate() {
+        cache.removeAll()
+        queued.removeAll()
+    }
 }

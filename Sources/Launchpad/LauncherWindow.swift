@@ -15,6 +15,7 @@ final class LauncherController {
     private let panel: LauncherPanel
     private var monitors: [Any] = []
     private var swipeAccum: CGFloat = 0
+    private var swipeAxisHorizontal: Bool?
     private var lastWheelPage = Date.distantPast
     private var hiding = false
     private var optionJiggle = false
@@ -90,7 +91,7 @@ final class LauncherController {
         store.showingOrganizer = false
         store.clearUndo()
         store.swipeOffset = 0
-        store.reload()
+        store.refreshInBackground()
 
         panel.alphaValue = 0
         NSApp.activate()
@@ -241,10 +242,15 @@ final class LauncherController {
         let width = panel.frame.width
         if event.hasPreciseScrollingDeltas {
             // Trackpad: follow the fingers, then snap to a page.
-            if event.phase == .began { swipeAccum = 0 }
+            if event.phase == .began { swipeAccum = 0; swipeAxisHorizontal = nil }
             if event.phase == .began || event.phase == .changed {
-                let delta = abs(event.scrollingDeltaX) >= abs(event.scrollingDeltaY) ? event.scrollingDeltaX : event.scrollingDeltaY
-                swipeAccum += delta
+                // Lock to one axis for the whole swipe, so a slightly diagonal swipe doesn't mix in the other
+                // direction and flip pages the wrong way.
+                if swipeAxisHorizontal == nil, max(abs(event.scrollingDeltaX), abs(event.scrollingDeltaY)) > 1 {
+                    swipeAxisHorizontal = abs(event.scrollingDeltaX) >= abs(event.scrollingDeltaY)
+                }
+                guard let horizontal = swipeAxisHorizontal else { return true }
+                swipeAccum += horizontal ? event.scrollingDeltaX : event.scrollingDeltaY
                 var offset = swipeAccum
                 let atStart = store.currentPage == 0 && offset > 0
                 let atEnd = store.currentPage == store.pageCount - 1 && offset < 0

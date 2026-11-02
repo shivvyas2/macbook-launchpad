@@ -7,10 +7,11 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 swift build -c release --arch arm64 --arch x86_64
+BIN=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)
 APP=build/Launchpad.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/apple/Products/Release/Launchpad "$APP/Contents/MacOS/Launchpad"
+cp "$BIN/Launchpad" "$APP/Contents/MacOS/Launchpad"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
 if [[ ! -f build/AppIcon.icns ]]; then

@@ -36,12 +36,17 @@ static int contactCallback(MTDeviceRef device, MTTouch *touches, int count, doub
     (void)device; (void)frame;
     if (!gHandler) return 0;
     float xs[MAX_TOUCHES], ys[MAX_TOUCHES];
-    int n = count < MAX_TOUCHES ? count : MAX_TOUCHES;
-    for (int i = 0; i < n; i++) {
-        xs[i] = touches[i].normalized.position.x;
-        ys[i] = touches[i].normalized.position.y;
+    int ids[MAX_TOUCHES];
+    int n = 0;
+    for (int i = 0; i < count && n < MAX_TOUCHES; i++) {
+        // Only fingers actually on the glass (3 = touch began, 4 = touching); skip hovering and lifting contacts.
+        if (touches[i].state != 3 && touches[i].state != 4) continue;
+        xs[n] = touches[i].normalized.position.x;
+        ys[n] = touches[i].normalized.position.y;
+        ids[n] = touches[i].identifier;
+        n++;
     }
-    gHandler(n, xs, ys, timestamp);
+    gHandler(n, xs, ys, ids, timestamp);
     return 0;
 }
 
